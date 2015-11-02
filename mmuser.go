@@ -94,6 +94,19 @@ func (u *User) addUsersToChannels() {
 			}
 		}(mmchannel)
 	}
+
+	// add all users, also who are not on channels
+	for _, mmuser := range u.MmUsers {
+		_, ok := srv.HasUser(mmuser.Username)
+		if !ok {
+			ghost := &User{Nick: mmuser.Username, User: mmuser.Id,
+				Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+			ghost.MmGhostUser = true
+			logger.Info("adding", ghost.Nick, "without a channel")
+			srv.Add(ghost)
+			go srv.Handle(ghost)
+		}
+	}
 }
 
 type MmInfo struct {
@@ -186,4 +199,38 @@ func (u *User) getMMUserId(name string) string {
 		}
 	}
 	return ""
+}
+
+func (u *User) MsgUser(toUser *User, msg string) {
+	u.Encode(&irc.Message{
+		Prefix:   toUser.Prefix(),
+		Command:  irc.PRIVMSG,
+		Params:   []string{u.Nick},
+		Trailing: msg,
+	})
+}
+
+func (u *User) handleMMDM(toUser *User, msg string) {
+	var channel string
+	// We don't have a DM with this user yet.
+	if u.getMMChannelId(toUser.User+"__"+u.MmUser.Id) == "" && u.getMMChannelId(u.MmUser.Id+"__"+toUser.User) == "" {
+		// create DM channel
+		_, err := u.MmClient.CreateDirectChannel(map[string]string{"user_id": toUser.User})
+		if err != nil {
+			logger.Debugf("direct message to %#v failed: %s", toUser, err)
+		}
+		// update our channels
+		mmchannels, _ := u.MmClient.GetChannels("")
+		u.MmChannels = mmchannels.Data.(*model.ChannelList)
+	}
+
+	// build the channel name
+	if toUser.User > u.MmUser.Id {
+		channel = u.MmUser.Id + "__" + toUser.User
+	} else {
+		channel = toUser.User + "__" + u.MmUser.Id
+	}
+	// build & send the message
+	post := &model.Post{ChannelId: u.getMMChannelId(channel), Message: msg}
+	u.MmClient.CreatePost(post)
 }

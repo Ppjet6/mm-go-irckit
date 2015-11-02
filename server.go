@@ -588,10 +588,8 @@ func (s *server) handle(u *User) {
 			query := msg.Params[0]
 			if toChan, exists := s.HasChannel(query); exists {
 				p := strings.Replace(msg.Params[0], "#", "", -1)
-				fmt.Println(u.getMMChannelId(p))
 				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
 				u.MmClient.CreatePost(post)
-
 				toChan.Message(u, msg.Trailing)
 				s.Publish(&event{ChanMsgEvent, s, toChan, u, msg})
 			} else if toUser, exists := s.HasUser(query); exists {
@@ -605,31 +603,15 @@ func (s *server) handle(u *User) {
 					}
 					err := u.loginToMattermost(data[1], data[2], data[3], data[4])
 					if err != nil {
-						u.Encode(&irc.Message{
-							Prefix:   toUser.Prefix(),
-							Command:  irc.PRIVMSG,
-							Params:   []string{u.Nick},
-							Trailing: "login failed",
-						})
+						u.MsgUser(toUser, "login failed")
 						continue
 					}
-					u.Encode(&irc.Message{
-						Prefix:   toUser.Prefix(),
-						Command:  irc.PRIVMSG,
-						Params:   []string{u.Nick},
-						Trailing: "login OK",
-					})
+					u.MsgUser(toUser, "login OK")
 					continue
 				}
 
 				if toUser.MmGhostUser {
-					if toUser.User > u.MmUser.Id {
-						post := &model.Post{ChannelId: u.getMMChannelId(u.MmUser.Id + "__" + toUser.User), Message: msg.Trailing}
-						u.MmClient.CreatePost(post)
-					} else {
-						post := &model.Post{ChannelId: u.getMMChannelId(toUser.User + "__" + u.MmUser.Id), Message: msg.Trailing}
-						u.MmClient.CreatePost(post)
-					}
+					u.handleMMDM(toUser, msg.Trailing)
 					continue
 				}
 				toUser.Encode(&irc.Message{

@@ -37,6 +37,9 @@ func (u *User) loginToMattermost(url string, team string, email string, pass str
 	}
 	u.MmUser = myinfo.Data.(*model.User)
 
+	myinfo, err = MmClient.GetMyTeam("")
+	u.MmTeam = myinfo.Data.(*model.Team)
+
 	// setup websocket connection
 	wsurl := "wss://" + url + "/api/v1/websocket"
 	header := http.Header{}
@@ -62,7 +65,12 @@ func (u *User) loginToMattermost(url string, team string, email string, pass str
 }
 
 func (u *User) addUsersToChannels() {
+	var mmConnected bool
 	srv := u.Srv
+	// already connected to a mm server ? add teamname as suffix
+	if _, ok := srv.HasChannel("#town-square"); ok {
+		mmConnected = true
+	}
 	rate := time.Second / 2
 	throttle := time.Tick(rate)
 
@@ -75,14 +83,28 @@ func (u *User) addUsersToChannels() {
 		<-throttle
 		go func(mmchannel *model.Channel) {
 			edata, _ := u.MmClient.GetChannelExtraInfo(mmchannel.Id, "")
+			if mmConnected {
+				mmchannel.Name = mmchannel.Name + "-" + u.MmTeam.Name
+			}
 			for _, d := range edata.Data.(*model.ChannelExtra).Members {
+				if mmConnected {
+					d.Username = d.Username + "-" + u.MmTeam.Name
+				}
+				// join all the channels we're on on MM
+				if d.Id == u.MmUser.Id {
+					ch := srv.Channel("#" + mmchannel.Name)
+					ch.Join(u)
+					// we're done here
+					continue
+				}
+
 				cghost, ok := srv.HasUser(d.Username)
 				if !ok {
 					ghost := &User{Nick: d.Username, User: d.Id,
 						Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
 
 					ghost.MmGhostUser = true
-					logger.Info("adding", ghost.Nick, "to #", mmchannel.Name)
+					logger.Info("adding", ghost.Nick, "to #"+mmchannel.Name)
 					srv.Add(ghost)
 					go srv.Handle(ghost)
 					ch := srv.Channel("#" + mmchannel.Name)
@@ -97,8 +119,15 @@ func (u *User) addUsersToChannels() {
 
 	// add all users, also who are not on channels
 	for _, mmuser := range u.MmUsers {
+		// do not add our own nick
+		if mmuser.Id == u.MmUser.Id {
+			continue
+		}
 		_, ok := srv.HasUser(mmuser.Username)
 		if !ok {
+			if mmConnected {
+				mmuser.Username = mmuser.Username + "-" + u.MmTeam.Name
+			}
 			ghost := &User{Nick: mmuser.Username, User: mmuser.Id,
 				Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
 			ghost.MmGhostUser = true
@@ -117,6 +146,7 @@ type MmInfo struct {
 	MmUsers     map[string]*model.User
 	MmUser      *model.User
 	MmChannels  *model.ChannelList
+	MmTeam      *model.Team
 }
 
 func (u *User) WsReceiver() {

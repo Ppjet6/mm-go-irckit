@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
 
@@ -60,6 +61,9 @@ type Server interface {
 	// the same ID. The server is not responsible for evicting members of an
 	// unlinked channel.
 	UnlinkChannel(Channel)
+
+	Add(u *User) bool
+	Handle(u *User)
 }
 
 // ServerConfig produces a Server setup with configuration options.
@@ -451,6 +455,10 @@ func (s *server) names(u *User, channels ...string) []*irc.Message {
 	return r
 }
 
+func (s *server) Handle(u *User) {
+	s.handle(u)
+}
+
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
@@ -576,11 +584,54 @@ func (s *server) handle(u *User) {
 				})
 				continue
 			}
+
 			query := msg.Params[0]
 			if toChan, exists := s.HasChannel(query); exists {
+				p := strings.Replace(msg.Params[0], "#", "", -1)
+				fmt.Println(u.getMMChannelId(p))
+				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
+				u.MmClient.CreatePost(post)
+
 				toChan.Message(u, msg.Trailing)
 				s.Publish(&event{ChanMsgEvent, s, toChan, u, msg})
 			} else if toUser, exists := s.HasUser(query); exists {
+				if query == "mattermost" {
+					if !strings.HasPrefix(msg.Trailing, "LOGIN") {
+						continue
+					}
+					data := strings.Split(msg.Trailing, " ")
+					if len(data) != 5 {
+						continue
+					}
+					err := u.loginToMattermost(data[1], data[2], data[3], data[4])
+					if err != nil {
+						u.Encode(&irc.Message{
+							Prefix:   toUser.Prefix(),
+							Command:  irc.PRIVMSG,
+							Params:   []string{u.Nick},
+							Trailing: "login failed",
+						})
+						continue
+					}
+					u.Encode(&irc.Message{
+						Prefix:   toUser.Prefix(),
+						Command:  irc.PRIVMSG,
+						Params:   []string{u.Nick},
+						Trailing: "login OK",
+					})
+					continue
+				}
+
+				if toUser.MmGhostUser {
+					if toUser.User > u.MmUser.Id {
+						post := &model.Post{ChannelId: u.getMMChannelId(u.MmUser.Id + "__" + toUser.User), Message: msg.Trailing}
+						u.MmClient.CreatePost(post)
+					} else {
+						post := &model.Post{ChannelId: u.getMMChannelId(toUser.User + "__" + u.MmUser.Id), Message: msg.Trailing}
+						u.MmClient.CreatePost(post)
+					}
+					continue
+				}
 				toUser.Encode(&irc.Message{
 					Prefix:   u.Prefix(),
 					Command:  irc.PRIVMSG,
@@ -612,6 +663,10 @@ func (s *server) handle(u *User) {
 			return
 		}
 	}
+}
+
+func (s *server) Add(u *User) (ok bool) {
+	return s.add(u)
 }
 
 func (s *server) add(u *User) (ok bool) {

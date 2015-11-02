@@ -38,6 +38,8 @@ type User struct {
 	Host string
 
 	channels map[Channel]struct{}
+
+	MmInfo
 }
 
 func (u *User) ID() string {
@@ -112,6 +114,9 @@ func (u *User) VisibleTo() []*User {
 
 // Encode and send each msg until an error occurs, then returns.
 func (user *User) Encode(msgs ...*irc.Message) (err error) {
+	if user.MmGhostUser {
+		return nil
+	}
 	for _, msg := range msgs {
 		logger.Debugf("-> %s", msg)
 		err := user.Conn.Encode(msg)
@@ -124,6 +129,9 @@ func (user *User) Encode(msgs ...*irc.Message) (err error) {
 
 // Decode will receive and return a decoded message, or an error.
 func (user *User) Decode() (*irc.Message, error) {
+	if user.MmGhostUser {
+		return nil, nil
+	}
 	msg, err := user.Conn.Decode()
 	if err == nil && msg != nil {
 		logger.Debugf("<- %s", msg)

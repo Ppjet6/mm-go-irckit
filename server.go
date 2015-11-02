@@ -594,22 +594,9 @@ func (s *server) handle(u *User) {
 				s.Publish(&event{ChanMsgEvent, s, toChan, u, msg})
 			} else if toUser, exists := s.HasUser(query); exists {
 				if query == "mattermost" {
-					if !strings.HasPrefix(msg.Trailing, "LOGIN") {
-						continue
-					}
-					data := strings.Split(msg.Trailing, " ")
-					if len(data) != 5 {
-						continue
-					}
-					err := u.loginToMattermost(data[1], data[2], data[3], data[4])
-					if err != nil {
-						u.MsgUser(toUser, "login failed")
-						continue
-					}
-					u.MsgUser(toUser, "login OK")
+					u.handleMMServiceBot(toUser, msg.Trailing)
 					continue
 				}
-
 				if toUser.MmGhostUser {
 					u.handleMMDM(toUser, msg.Trailing)
 					continue

@@ -234,3 +234,26 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 	post := &model.Post{ChannelId: u.getMMChannelId(channel), Message: msg}
 	u.MmClient.CreatePost(post)
 }
+
+func (u *User) handleMMServiceBot(toUser *User, msg string) {
+	commands := strings.Fields(msg)
+	switch commands[0] {
+	case "LOGIN":
+		{
+			data := strings.Split(msg, " ")
+			if len(data) != 5 {
+				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+				return
+			}
+			err := u.loginToMattermost(data[1], data[2], data[3], data[4])
+			if err != nil {
+				u.MsgUser(toUser, "login failed")
+				return
+			}
+			u.MsgUser(toUser, "login OK")
+		}
+	default:
+		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+	}
+
+}

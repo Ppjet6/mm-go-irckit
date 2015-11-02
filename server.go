@@ -497,6 +497,7 @@ func (s *server) handle(u *User) {
 					continue
 				}
 				ch.Part(u, msg.Trailing)
+				u.MmClient.LeaveChannel(u.getMMChannelId(strings.Replace(chName, "#", "", 1)))
 			}
 		case irc.QUIT:
 			partMsg = msg.Trailing
@@ -535,6 +536,16 @@ func (s *server) handle(u *User) {
 			} else {
 				channels := strings.Split(msg.Params[0], ",")
 				for _, channel := range channels {
+					// you can only join existing channels
+					err := u.joinMMChannel(channel)
+					if err != nil {
+						u.Encode(&irc.Message{
+							Prefix:   s.Prefix(),
+							Command:  irc.ERR_INVITEONLYCHAN,
+							Trailing: "Cannot join channel (+i)",
+						})
+						continue
+					}
 					ch := s.Channel(channel)
 					err = ch.Join(u)
 					if err == nil {

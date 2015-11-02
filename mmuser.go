@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -57,6 +58,9 @@ func (u *User) loginToMattermost(url string, team string, email string, pass str
 	// populating channels
 	mmchannels, _ := MmClient.GetChannels("")
 	u.MmChannels = mmchannels.Data.(*model.ChannelList)
+
+	mmchannels, _ = MmClient.GetMoreChannels("")
+	u.MmMoreChannels = mmchannels.Data.(*model.ChannelList)
 
 	// fetch users and channels from mattermost
 	u.addUsersToChannels()
@@ -139,14 +143,15 @@ func (u *User) addUsersToChannels() {
 }
 
 type MmInfo struct {
-	MmGhostUser bool
-	MmClient    *model.Client
-	MmWsClient  *websocket.Conn
-	Srv         Server
-	MmUsers     map[string]*model.User
-	MmUser      *model.User
-	MmChannels  *model.ChannelList
-	MmTeam      *model.Team
+	MmGhostUser    bool
+	MmClient       *model.Client
+	MmWsClient     *websocket.Conn
+	Srv            Server
+	MmUsers        map[string]*model.User
+	MmUser         *model.User
+	MmChannels     *model.ChannelList
+	MmMoreChannels *model.ChannelList
+	MmTeam         *model.Team
 }
 
 func (u *User) WsReceiver() {
@@ -214,7 +219,7 @@ func (u *User) getMMChannelName(id string) string {
 }
 
 func (u *User) getMMChannelId(name string) string {
-	for _, channel := range u.MmChannels.Channels {
+	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
 		if channel.Name == name {
 			return channel.Id
 		}
@@ -286,4 +291,55 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 	}
 
+}
+
+func (u *User) syncMMChannel(id string, name string) {
+	var mmConnected bool
+	srv := u.Srv
+	// already connected to a mm server ? add teamname as suffix
+	if _, ok := srv.HasChannel("#town-square"); ok {
+		mmConnected = true
+	}
+
+	edata, _ := u.MmClient.GetChannelExtraInfo(id, "")
+	for _, d := range edata.Data.(*model.ChannelExtra).Members {
+		if mmConnected {
+			d.Username = d.Username + "-" + u.MmTeam.Name
+		}
+		// join all the channels we're on on MM
+		if d.Id == u.MmUser.Id {
+			ch := srv.Channel("#" + name)
+			ch.Join(u)
+			// we're done here
+			continue
+		}
+
+		cghost, ok := srv.HasUser(d.Username)
+		if !ok {
+			ghost := &User{Nick: d.Username, User: d.Id,
+				Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+
+			ghost.MmGhostUser = true
+			logger.Info("adding", ghost.Nick, "to #"+name)
+			srv.Add(ghost)
+			go srv.Handle(ghost)
+			ch := srv.Channel("#" + name)
+			ch.Join(ghost)
+		} else {
+			ch := srv.Channel("#" + name)
+			ch.Join(cghost)
+		}
+	}
+}
+
+func (u *User) joinMMChannel(channel string) error {
+	if u.getMMChannelId(strings.Replace(channel, "#", "", 1)) == "" {
+		return errors.New("failed to join")
+	}
+	_, err := u.MmClient.JoinChannel(u.getMMChannelId(strings.Replace(channel, "#", "", 1)))
+	if err != nil {
+		return errors.New("failed to join")
+	}
+	u.syncMMChannel(u.getMMChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
+	return nil
 }

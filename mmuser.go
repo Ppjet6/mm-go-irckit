@@ -68,6 +68,15 @@ func (u *User) loginToMattermost(url string, team string, email string, pass str
 	return nil
 }
 
+func (u *User) createMMUser(nick string, user string) *User {
+	if ghost, ok := u.Srv.HasUser(nick); ok {
+		return ghost
+	}
+	ghost := &User{Nick: nick, User: user, Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+	ghost.MmGhostUser = true
+	return ghost
+}
+
 func (u *User) addUsersToChannels() {
 	var mmConnected bool
 	srv := u.Srv
@@ -75,7 +84,7 @@ func (u *User) addUsersToChannels() {
 	if _, ok := srv.HasChannel("#town-square"); ok {
 		mmConnected = true
 	}
-	rate := time.Second / 2
+	rate := time.Second / 1
 	throttle := time.Tick(rate)
 
 	for _, mmchannel := range u.MmChannels.Channels {
@@ -90,15 +99,17 @@ func (u *User) addUsersToChannels() {
 			if mmConnected {
 				mmchannel.Name = mmchannel.Name + "-" + u.MmTeam.Name
 			}
+
+			// join ourself to all channels
+			ch := srv.Channel("#" + mmchannel.Name)
+			ch.Join(u)
+
 			for _, d := range edata.Data.(*model.ChannelExtra).Members {
 				if mmConnected {
 					d.Username = d.Username + "-" + u.MmTeam.Name
 				}
-				// join all the channels we're on on MM
+				// already joined
 				if d.Id == u.MmUser.Id {
-					ch := srv.Channel("#" + mmchannel.Name)
-					ch.Join(u)
-					// we're done here
 					continue
 				}
 
@@ -174,7 +185,7 @@ func (u *User) WsReceiver() {
 				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 				u.MmUsers = mmusers.Data.(map[string]*model.User)
 			}
-			ghost, _ := u.Srv.HasUser(u.MmUsers[data.UserId].Username)
+			ghost := u.createMMUser(u.MmUsers[data.UserId].Username, data.UserId)
 			rcvchannel := u.getMMChannelName(data.ChannelId)
 			if strings.Contains(rcvchannel, "__") {
 				var rcvuser string
@@ -195,7 +206,9 @@ func (u *User) WsReceiver() {
 				continue
 			}
 
+			logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.getMMChannelName(data.ChannelId))
 			ch := u.Srv.Channel("#" + u.getMMChannelName(data.ChannelId))
+			ch.Join(ghost)
 			msgs := strings.Split(data.Message, "\n")
 			for _, m := range msgs {
 				ch.Message(ghost, m)

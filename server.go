@@ -424,6 +424,39 @@ func (s *server) ison(u *User, nicks ...string) []*irc.Message {
 	}
 }
 
+// list lists all channels on the server
+func (s *server) list(u *User) []*irc.Message {
+	r := []*irc.Message{}
+	msg := irc.Message{
+		Prefix:   s.Prefix(),
+		Command:  irc.RPL_LISTSTART,
+		Params:   []string{u.Nick},
+		Trailing: "Channel Users Topic",
+	}
+	r = append(r, &msg)
+
+	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
+		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
+		if strings.Contains(channel.Name, "__") {
+			continue
+		}
+		msg := irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_LIST,
+			Params:   []string{u.Nick},
+			Trailing: channel.Name + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
+		}
+		r = append(r, &msg)
+	}
+	r = append(r, &irc.Message{
+		Prefix:   s.Prefix(),
+		Params:   []string{u.Nick},
+		Command:  irc.RPL_LISTEND,
+		Trailing: "End of /LIST",
+	})
+	return r
+}
+
 // names lists all names for a given channel
 func (s *server) names(u *User, channels ...string) []*irc.Message {
 	// TODO: Support full list?
@@ -565,6 +598,8 @@ func (s *server) handle(u *User) {
 				continue
 			}
 			err = u.Encode(s.names(u, msg.Params[0])...)
+		case irc.LIST:
+			u.Encode(s.list(u)...)
 		case irc.WHO:
 			if len(msg.Params) < 1 {
 				u.Encode(&irc.Message{

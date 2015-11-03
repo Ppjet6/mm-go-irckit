@@ -206,6 +206,24 @@ func (u *User) WsReceiver() {
 			logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
 			logger.Debugf("%#v", data)
 		}
+		if rmsg.Action == model.ACTION_USER_REMOVED {
+			if u.MmUsers[rmsg.UserId] == nil {
+				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
+				u.MmUsers = mmusers.Data.(map[string]*model.User)
+			}
+			ghost, _ := u.Srv.HasUser(u.MmUsers[rmsg.UserId].Username)
+			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+			ch.Part(ghost, "")
+		}
+		if rmsg.Action == model.ACTION_USER_ADDED {
+			if u.MmUsers[rmsg.UserId] == nil {
+				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
+				u.MmUsers = mmusers.Data.(map[string]*model.User)
+			}
+			ghost, _ := u.Srv.HasUser(u.MmUsers[rmsg.UserId].Username)
+			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+			ch.Join(ghost)
+		}
 	}
 }
 

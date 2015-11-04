@@ -52,6 +52,9 @@ type Channel interface {
 
 	// String returns the name of the channel
 	String() string
+
+	// Spoof message
+	SpoofMessage(from string, text string)
 }
 
 type channel struct {

@@ -104,6 +104,7 @@ func (u *User) addUsersToChannels() {
 			ch := srv.Channel("#" + mmchannel.Name)
 			ch.Join(u)
 
+			// add everyone on the MM channel to the IRC channel
 			for _, d := range edata.Data.(*model.ChannelExtra).Members {
 				if mmConnected {
 					d.Username = d.Username + "-" + u.MmTeam.Name
@@ -129,6 +130,20 @@ func (u *User) addUsersToChannels() {
 					ch.Join(cghost)
 				}
 			}
+
+			// post everything to the channel you haven't seen yet
+			postlist := u.getMMPostsSince(mmchannel.Id, u.MmChannels.Members[mmchannel.Id].LastViewedAt)
+			if postlist == nil {
+				logger.Errorf("something wrong with getMMPostsSince")
+				return
+			}
+			logger.Debugf("%#v", u.MmChannels.Members[mmchannel.Id])
+			for _, id := range postlist.Order {
+				for _, post := range strings.Split(postlist.Posts[id].Message, "\n") {
+					ch.SpoofMessage(u.MmUsers[postlist.Posts[id].UserId].Username, post)
+				}
+			}
+
 		}(mmchannel)
 	}
 
@@ -224,7 +239,11 @@ func (u *User) WsReceiver() {
 				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 				u.MmUsers = mmusers.Data.(map[string]*model.User)
 			}
-			ghost, _ := u.Srv.HasUser(u.MmUsers[rmsg.UserId].Username)
+			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+			if ghost == nil {
+				logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+				continue
+			}
 			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
 			ch.Part(ghost, "")
 		}
@@ -233,7 +252,11 @@ func (u *User) WsReceiver() {
 				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 				u.MmUsers = mmusers.Data.(map[string]*model.User)
 			}
-			ghost, _ := u.Srv.HasUser(u.MmUsers[rmsg.UserId].Username)
+			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+			if ghost == nil {
+				logger.Debug("couldn't add user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+				continue
+			}
 			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
 			ch.Join(ghost)
 		}
@@ -373,4 +396,12 @@ func (u *User) joinMMChannel(channel string) error {
 	}
 	u.syncMMChannel(u.getMMChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
 	return nil
+}
+
+func (u *User) getMMPostsSince(channelId string, time int64) *model.PostList {
+	res, err := u.MmClient.GetPostsSince(channelId, time)
+	if err != nil {
+		return nil
+	}
+	return res.Data.(*model.PostList)
 }

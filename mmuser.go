@@ -4,11 +4,11 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jpillora/backoff"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
@@ -29,27 +29,56 @@ func NewUserMM(c net.Conn, srv Server) *User {
 	return u
 }
 
-func (u *User) loginToMattermost(url string, team string, email string, pass string) error {
-	// login to mattermost
-	MmClient := model.NewClient("https://" + url)
-	myinfo, err := MmClient.LoginByEmail(team, email, pass)
-	if err != nil {
-		return err
+func (u *User) loginToMattermost() error {
+	b := &backoff.Backoff{
+		Min:    time.Second,
+		Max:    5 * time.Minute,
+		Jitter: true,
 	}
+	// login to mattermost
+	//u.Credentials = &MmCredentials{Server: url, Team: team, Login: email, Pass: pass}
+	MmClient := model.NewClient("https://" + u.Credentials.Server)
+	var myinfo *model.Result
+	var appErr *model.AppError
+	for {
+		logger.Debug("retrying login", u.Credentials.Team, u.Credentials.Login, u.Credentials.Server)
+		myinfo, appErr = MmClient.LoginByEmail(u.Credentials.Team, u.Credentials.Login, u.Credentials.Pass)
+		if appErr != nil {
+			d := b.Duration()
+			logger.Infof("LOGIN: %s, reconnecting in %s", appErr, d)
+			time.Sleep(d)
+			continue
+		}
+		break
+	}
+	// reset timer
+	b.Reset()
 	u.MmUser = myinfo.Data.(*model.User)
 
-	myinfo, err = MmClient.GetMyTeam("")
+	myinfo, _ = MmClient.GetMyTeam("")
 	u.MmTeam = myinfo.Data.(*model.Team)
 
 	// setup websocket connection
-	wsurl := "wss://" + url + "/api/v1/websocket"
+	wsurl := "wss://" + u.Credentials.Server + "/api/v1/websocket"
 	header := http.Header{}
 	header.Set(model.HEADER_AUTH, "BEARER "+MmClient.AuthToken)
-	WsClient, _, _ := websocket.DefaultDialer.Dial(wsurl, header)
+
+	var WsClient *websocket.Conn
+	var err error
+	for {
+		WsClient, _, err = websocket.DefaultDialer.Dial(wsurl, header)
+		if err != nil {
+			d := b.Duration()
+			logger.Infof("WSS: %s, reconnecting in %s", err, d)
+			time.Sleep(d)
+			continue
+		}
+		break
+	}
+	b.Reset()
 
 	u.MmClient = MmClient
 	u.MmWsClient = WsClient
-	go u.WsReceiver()
 
 	// populating users
 	mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
@@ -82,7 +111,7 @@ func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	// already connected to a mm server ? add teamname as suffix
 	if _, ok := srv.HasChannel("#town-square"); ok {
-		mmConnected = true
+		//mmConnected = true
 	}
 	rate := time.Second / 1
 	throttle := time.Tick(rate)
@@ -143,6 +172,7 @@ func (u *User) addUsersToChannels() {
 					ch.SpoofMessage(u.MmUsers[postlist.Posts[id].UserId].Username, post)
 				}
 			}
+			u.updateMMLastViewed(mmchannel.Id)
 
 		}(mmchannel)
 	}
@@ -178,6 +208,14 @@ type MmInfo struct {
 	MmChannels     *model.ChannelList
 	MmMoreChannels *model.ChannelList
 	MmTeam         *model.Team
+	Credentials    *MmCredentials
+}
+
+type MmCredentials struct {
+	Login  string
+	Team   string
+	Pass   string
+	Server string
 }
 
 func (u *User) WsReceiver() {
@@ -185,9 +223,10 @@ func (u *User) WsReceiver() {
 	for {
 		if err := u.MmWsClient.ReadJSON(&rmsg); err != nil {
 			logger.Critical(err)
-			os.Exit(1)
+			// reconnect
+			u.loginToMattermost()
 		}
-		logger.Debugf("%#v", rmsg)
+		logger.Debugf("WsReceiver: %#v", rmsg)
 		if rmsg.Action == model.ACTION_POSTED {
 			data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
 			logger.Debug("receiving userid", data.UserId)
@@ -233,6 +272,9 @@ func (u *User) WsReceiver() {
 			//mychan[0].Message(ghost, data.Message)
 			logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
 			logger.Debugf("%#v", data)
+
+			// updatelastviewed
+			u.updateMMLastViewed(data.ChannelId)
 		}
 		if rmsg.Action == model.ACTION_USER_REMOVED {
 			if u.MmUsers[rmsg.UserId] == nil {
@@ -334,11 +376,14 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 				return
 			}
-			err := u.loginToMattermost(data[1], data[2], data[3], data[4])
+			u.Credentials = &MmCredentials{Server: data[1], Team: data[2], Login: data[3], Pass: data[4]}
+			//err := u.loginToMattermost(data[1], data[2], data[3], data[4])
+			err := u.loginToMattermost()
 			if err != nil {
 				u.MsgUser(toUser, "login failed")
 				return
 			}
+			go u.WsReceiver()
 			u.MsgUser(toUser, "login OK")
 		}
 	default:
@@ -404,4 +449,12 @@ func (u *User) getMMPostsSince(channelId string, time int64) *model.PostList {
 		return nil
 	}
 	return res.Data.(*model.PostList)
+}
+
+func (u *User) updateMMLastViewed(channelId string) {
+	logger.Debugf("posting lastview %#v", channelId)
+	_, err := u.MmClient.UpdateLastViewedAt(channelId)
+	if err != nil {
+		logger.Info(err)
+	}
 }

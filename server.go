@@ -517,6 +517,7 @@ func (s *server) handle(u *User) {
 				})
 				continue
 			}
+			logger.Debugf("channels: %#v", s.channels)
 			channels := strings.Split(msg.Params[0], ",")
 			for _, chName := range channels {
 				ch, exists := s.HasChannel(chName)
@@ -545,6 +546,7 @@ func (s *server) handle(u *User) {
 				Trailing: "You will be missed.",
 			})
 			s.Publish(&event{QuitEvent, s, nil, u, msg})
+			logger.Debugf("close client %#v", u.MmWsClient.Close())
 			return
 		case irc.PING:
 			err = u.Encode(&irc.Message{

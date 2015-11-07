@@ -25,7 +25,10 @@ func NewUserMM(c net.Conn, srv Server) *User {
 	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "ghost", Host: "abchost", channels: map[Channel]struct{}{}}
 	mattermostService.MmGhostUser = true
 	srv.Add(mattermostService)
-	go srv.Handle(mattermostService)
+	if _, ok := srv.HasUser("mattermost"); !ok {
+		go srv.Handle(mattermostService)
+	}
+
 	return u
 }
 
@@ -76,6 +79,11 @@ func (u *User) loginToMattermost() error {
 		break
 	}
 	b.Reset()
+
+	newserver := NewServer("matterircd")
+	newserver.Add(u)
+	go newserver.Handle(u)
+	u.Srv = newserver
 
 	u.MmClient = MmClient
 	u.MmWsClient = WsClient
@@ -281,6 +289,13 @@ func (u *User) WsReceiver() {
 				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 				u.MmUsers = mmusers.Data.(map[string]*model.User)
 			}
+			// remove ourselves from the channel
+			if rmsg.UserId == u.MmUser.Id {
+				ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+				ch.Part(u, "")
+				continue
+			}
+
 			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
 			if ghost == nil {
 				logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
@@ -290,9 +305,20 @@ func (u *User) WsReceiver() {
 			ch.Part(ghost, "")
 		}
 		if rmsg.Action == model.ACTION_USER_ADDED {
+			if u.getMMChannelName(rmsg.ChannelId) == "" {
+				u.updateMMChannels()
+			}
+
 			if u.MmUsers[rmsg.UserId] == nil {
 				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 				u.MmUsers = mmusers.Data.(map[string]*model.User)
+			}
+			// add ourselves to the channel
+			if rmsg.UserId == u.MmUser.Id {
+				ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+				logger.Debug("ACTION_USER_ADDED adding myself to", u.getMMChannelName(rmsg.ChannelId), rmsg.ChannelId)
+				ch.Join(u)
+				continue
 			}
 			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
 			if ghost == nil {
@@ -306,7 +332,7 @@ func (u *User) WsReceiver() {
 }
 
 func (u *User) getMMChannelName(id string) string {
-	for _, channel := range u.MmChannels.Channels {
+	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
 		if channel.Id == id {
 			return channel.Name
 		}
@@ -385,6 +411,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			}
 			go u.WsReceiver()
 			u.MsgUser(toUser, "login OK")
+
 		}
 	default:
 		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
@@ -397,7 +424,7 @@ func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
 	// already connected to a mm server ? add teamname as suffix
 	if _, ok := srv.HasChannel("#town-square"); ok {
-		mmConnected = true
+		//mmConnected = true
 	}
 
 	edata, _ := u.MmClient.GetChannelExtraInfo(id, "")
@@ -408,9 +435,8 @@ func (u *User) syncMMChannel(id string, name string) {
 		// join all the channels we're on on MM
 		if d.Id == u.MmUser.Id {
 			ch := srv.Channel("#" + name)
+			logger.Debug("syncMMChannel adding myself to ", name, id)
 			ch.Join(u)
-			// we're done here
-			continue
 		}
 
 		cghost, ok := srv.HasUser(d.Username)
@@ -457,4 +483,12 @@ func (u *User) updateMMLastViewed(channelId string) {
 	if err != nil {
 		logger.Info(err)
 	}
+}
+
+func (u *User) updateMMChannels() error {
+	mmchannels, _ := u.MmClient.GetChannels("")
+	u.MmChannels = mmchannels.Data.(*model.ChannelList)
+	mmchannels, _ = u.MmClient.GetMoreChannels("")
+	u.MmMoreChannels = mmchannels.Data.(*model.ChannelList)
+	return nil
 }

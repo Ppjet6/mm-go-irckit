@@ -546,7 +546,9 @@ func (s *server) handle(u *User) {
 				Trailing: "You will be missed.",
 			})
 			s.Publish(&event{QuitEvent, s, nil, u, msg})
-			logger.Debugf("close client %#v", u.MmWsClient.Close())
+			if u.MmWsClient != nil {
+				logger.Debugf("close client %#v", u.MmWsClient.Close())
+			}
 			return
 		case irc.PING:
 			err = u.Encode(&irc.Message{

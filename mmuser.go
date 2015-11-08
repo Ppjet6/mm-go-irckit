@@ -48,6 +48,10 @@ func (u *User) loginToMattermost() error {
 		myinfo, appErr = MmClient.LoginByEmail(u.Credentials.Team, u.Credentials.Login, u.Credentials.Pass)
 		if appErr != nil {
 			d := b.Duration()
+			if !strings.Contains(appErr.DetailedError, "connection refused") &&
+				!strings.Contains(appErr.DetailedError, "invalid character") {
+				return errors.New(appErr.Message)
+			}
 			logger.Infof("LOGIN: %s, reconnecting in %s", appErr, d)
 			time.Sleep(d)
 			continue
@@ -89,15 +93,10 @@ func (u *User) loginToMattermost() error {
 	u.MmWsClient = WsClient
 
 	// populating users
-	mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
-	u.MmUsers = mmusers.Data.(map[string]*model.User)
+	u.updateMMUsers()
 
 	// populating channels
-	mmchannels, _ := MmClient.GetChannels("")
-	u.MmChannels = mmchannels.Data.(*model.ChannelList)
-
-	mmchannels, _ = MmClient.GetMoreChannels("")
-	u.MmMoreChannels = mmchannels.Data.(*model.ChannelList)
+	u.updateMMChannels()
 
 	// fetch users and channels from mattermost
 	u.addUsersToChannels()
@@ -231,104 +230,116 @@ func (u *User) WsReceiver() {
 	for {
 		if err := u.MmWsClient.ReadJSON(&rmsg); err != nil {
 			logger.Critical(err)
+			// did the user quit
+			if _, ok := u.Srv.HasUser(u.Nick); !ok {
+				logger.Debug("user has quit, not reconnecting")
+				u.MmWsClient.Close()
+				return
+			}
 			// reconnect
 			u.loginToMattermost()
 		}
 		logger.Debugf("WsReceiver: %#v", rmsg)
-		if rmsg.Action == model.ACTION_POSTED {
-			data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
-			logger.Debug("receiving userid", data.UserId)
-			if data.UserId == u.MmUser.Id {
-				// our own message
-				continue
-			}
-			// we don't have the user, refresh the userlist
-			if u.MmUsers[data.UserId] == nil {
-				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
-				u.MmUsers = mmusers.Data.(map[string]*model.User)
-			}
-			ghost := u.createMMUser(u.MmUsers[data.UserId].Username, data.UserId)
-			rcvchannel := u.getMMChannelName(data.ChannelId)
-			if strings.Contains(rcvchannel, "__") {
-				var rcvuser string
-				rcvusers := strings.Split(rcvchannel, "__")
-				if rcvusers[0] != u.MmUser.Id {
-					rcvuser = u.MmUsers[rcvusers[0]].Username
-				} else {
-					rcvuser = u.MmUsers[rcvusers[1]].Username
-				}
-
-				u.Encode(&irc.Message{
-					Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
-					Command:  irc.PRIVMSG,
-					Params:   []string{u.Nick},
-					Trailing: data.Message,
-				})
-				//u.Srv.Publish(&event{UserMsgEvent, u.Srv, nil, u, msg})
-				continue
-			}
-
-			logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.getMMChannelName(data.ChannelId))
-			ch := u.Srv.Channel("#" + u.getMMChannelName(data.ChannelId))
-			ch.Join(ghost)
-			msgs := strings.Split(data.Message, "\n")
-			for _, m := range msgs {
-				ch.Message(ghost, m)
-			}
-			//ch := srv.Channel("#" + data.Channel)
-
-			//mychan[0].Message(ghost, data.Message)
-			logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
-			logger.Debugf("%#v", data)
-
-			// updatelastviewed
-			u.updateMMLastViewed(data.ChannelId)
-		}
-		if rmsg.Action == model.ACTION_USER_REMOVED {
-			if u.MmUsers[rmsg.UserId] == nil {
-				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
-				u.MmUsers = mmusers.Data.(map[string]*model.User)
-			}
-			// remove ourselves from the channel
-			if rmsg.UserId == u.MmUser.Id {
-				ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
-				ch.Part(u, "")
-				continue
-			}
-
-			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
-			if ghost == nil {
-				logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
-				continue
-			}
-			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
-			ch.Part(ghost, "")
-		}
-		if rmsg.Action == model.ACTION_USER_ADDED {
-			if u.getMMChannelName(rmsg.ChannelId) == "" {
-				u.updateMMChannels()
-			}
-
-			if u.MmUsers[rmsg.UserId] == nil {
-				mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
-				u.MmUsers = mmusers.Data.(map[string]*model.User)
-			}
-			// add ourselves to the channel
-			if rmsg.UserId == u.MmUser.Id {
-				ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
-				logger.Debug("ACTION_USER_ADDED adding myself to", u.getMMChannelName(rmsg.ChannelId), rmsg.ChannelId)
-				ch.Join(u)
-				continue
-			}
-			ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
-			if ghost == nil {
-				logger.Debug("couldn't add user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
-				continue
-			}
-			ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
-			ch.Join(ghost)
+		switch rmsg.Action {
+		case model.ACTION_POSTED:
+			u.handleWsActionPost(&rmsg)
+		case model.ACTION_USER_REMOVED:
+			u.handleWsActionUserRemoved(&rmsg)
+		case model.ACTION_USER_ADDED:
+			u.handleWsActionUserAdded(&rmsg)
 		}
 	}
+}
+
+func (u *User) handleWsActionPost(rmsg *model.Message) {
+	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
+	logger.Debug("receiving userid", data.UserId)
+	if data.UserId == u.MmUser.Id {
+		// our own message
+		return
+	}
+	// we don't have the user, refresh the userlist
+	if u.MmUsers[data.UserId] == nil {
+		u.updateMMUsers()
+	}
+	ghost := u.createMMUser(u.MmUsers[data.UserId].Username, data.UserId)
+	rcvchannel := u.getMMChannelName(data.ChannelId)
+	// direct message
+	if strings.Contains(rcvchannel, "__") {
+		logger.Debug("direct message")
+		var rcvuser string
+		rcvusers := strings.Split(rcvchannel, "__")
+		if rcvusers[0] != u.MmUser.Id {
+			rcvuser = u.MmUsers[rcvusers[0]].Username
+		} else {
+			rcvuser = u.MmUsers[rcvusers[1]].Username
+		}
+		msgs := strings.Split(data.Message, "\n")
+		for _, m := range msgs {
+			u.MsgSpoofUser(rcvuser, m)
+		}
+		return
+	}
+
+	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.getMMChannelName(data.ChannelId))
+	ch := u.Srv.Channel("#" + rcvchannel)
+	ch.Join(ghost)
+	msgs := strings.Split(data.Message, "\n")
+	for _, m := range msgs {
+		ch.Message(ghost, m)
+	}
+	logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
+	logger.Debugf("%#v", data)
+
+	// updatelastviewed
+	u.updateMMLastViewed(data.ChannelId)
+	return
+}
+
+func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
+	if u.MmUsers[rmsg.UserId] == nil {
+		u.updateMMUsers()
+	}
+	ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+
+	// remove ourselves from the channel
+	if rmsg.UserId == u.MmUser.Id {
+		ch.Part(u, "")
+		return
+	}
+
+	ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+	if ghost == nil {
+		logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+		return
+	}
+	ch.Part(ghost, "")
+	return
+}
+
+func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
+	if u.getMMChannelName(rmsg.ChannelId) == "" {
+		u.updateMMChannels()
+	}
+
+	if u.MmUsers[rmsg.UserId] == nil {
+		u.updateMMUsers()
+	}
+
+	ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+	// add ourselves to the channel
+	if rmsg.UserId == u.MmUser.Id {
+		logger.Debug("ACTION_USER_ADDED adding myself to", u.getMMChannelName(rmsg.ChannelId), rmsg.ChannelId)
+		ch.Join(u)
+		return
+	}
+	ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+	if ghost == nil {
+		logger.Debug("couldn't add user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+		return
+	}
+	ch.Join(ghost)
+	return
 }
 
 func (u *User) getMMChannelName(id string) string {
@@ -361,6 +372,15 @@ func (u *User) getMMUserId(name string) string {
 func (u *User) MsgUser(toUser *User, msg string) {
 	u.Encode(&irc.Message{
 		Prefix:   toUser.Prefix(),
+		Command:  irc.PRIVMSG,
+		Params:   []string{u.Nick},
+		Trailing: msg,
+	})
+}
+
+func (u *User) MsgSpoofUser(rcvuser string, msg string) {
+	u.Encode(&irc.Message{
+		Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
 		Command:  irc.PRIVMSG,
 		Params:   []string{u.Nick},
 		Trailing: msg,
@@ -406,7 +426,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			//err := u.loginToMattermost(data[1], data[2], data[3], data[4])
 			err := u.loginToMattermost()
 			if err != nil {
-				u.MsgUser(toUser, "login failed")
+				u.MsgUser(toUser, err.Error())
 				return
 			}
 			go u.WsReceiver()
@@ -490,5 +510,11 @@ func (u *User) updateMMChannels() error {
 	u.MmChannels = mmchannels.Data.(*model.ChannelList)
 	mmchannels, _ = u.MmClient.GetMoreChannels("")
 	u.MmMoreChannels = mmchannels.Data.(*model.ChannelList)
+	return nil
+}
+
+func (u *User) updateMMUsers() error {
+	mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
+	u.MmUsers = mmusers.Data.(map[string]*model.User)
 	return nil
 }

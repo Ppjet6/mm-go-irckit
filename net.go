@@ -38,5 +38,9 @@ func (c *conn) ResolveHost() string {
 		return ip
 	}
 
+	if len(names) == 0 {
+		return ip
+	}
+
 	return strings.TrimSuffix(names[0], ".")
 }

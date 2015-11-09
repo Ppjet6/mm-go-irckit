@@ -639,6 +639,12 @@ func (s *server) handle(u *User) {
 			if toChan, exists := s.HasChannel(query); exists {
 				p := strings.Replace(msg.Params[0], "#", "", -1)
 				msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
+				// fix non-rfc clients
+				if !strings.HasPrefix(msg.Trailing, ":") {
+					if len(msg.Params) == 2 {
+						msg.Trailing = msg.Params[1]
+					}
+				}
 				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
 				u.MmClient.CreatePost(post)
 				toChan.Message(u, msg.Trailing)

@@ -84,11 +84,6 @@ func (u *User) loginToMattermost() error {
 	}
 	b.Reset()
 
-	newserver := NewServer("matterircd")
-	newserver.Add(u)
-	go newserver.Handle(u)
-	u.Srv = newserver
-
 	u.MmClient = MmClient
 	u.MmWsClient = WsClient
 
@@ -408,6 +403,7 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 		channel = toUser.User + "__" + u.MmUser.Id
 	}
 	// build & send the message
+	msg = strings.Replace(msg, "\r", "", -1)
 	post := &model.Post{ChannelId: u.getMMChannelId(channel), Message: msg}
 	u.MmClient.CreatePost(post)
 }

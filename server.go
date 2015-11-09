@@ -638,6 +638,7 @@ func (s *server) handle(u *User) {
 			query := msg.Params[0]
 			if toChan, exists := s.HasChannel(query); exists {
 				p := strings.Replace(msg.Params[0], "#", "", -1)
+				msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
 				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
 				u.MmClient.CreatePost(post)
 				toChan.Message(u, msg.Trailing)

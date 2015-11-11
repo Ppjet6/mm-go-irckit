@@ -714,7 +714,7 @@ func (s *server) handle(u *User) {
 				s.Publish(&event{ChanMsgEvent, s, toChan, u, msg})
 			} else if toUser, exists := s.HasUser(query); exists {
 				if query == "mattermost" {
-					u.handleMMServiceBot(toUser, msg.Trailing)
+					go u.handleMMServiceBot(toUser, msg.Trailing)
 					continue
 				}
 				if toUser.MmGhostUser {

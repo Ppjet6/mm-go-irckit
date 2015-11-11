@@ -22,7 +22,7 @@ func NewUserMM(c net.Conn, srv Server) *User {
 	u.Srv = srv
 
 	// used for login
-	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "ghost", Host: "abchost", channels: map[Channel]struct{}{}}
+	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
 	mattermostService.MmGhostUser = true
 	srv.Add(mattermostService)
 	if _, ok := srv.HasUser("mattermost"); !ok {
@@ -99,11 +99,11 @@ func (u *User) loginToMattermost() error {
 	return nil
 }
 
-func (u *User) createMMUser(nick string, user string) *User {
-	if ghost, ok := u.Srv.HasUser(nick); ok {
+func (u *User) createMMUser(mmuser *model.User) *User {
+	if ghost, ok := u.Srv.HasUser(mmuser.Nickname); ok {
 		return ghost
 	}
-	ghost := &User{Nick: nick, User: user, Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	return ghost
 }
@@ -147,9 +147,7 @@ func (u *User) addUsersToChannels() {
 
 				cghost, ok := srv.HasUser(d.Username)
 				if !ok {
-					ghost := &User{Nick: d.Username, User: d.Id,
-						Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
-
+					ghost := u.createMMUser(u.MmUsers[d.Id])
 					ghost.MmGhostUser = true
 					logger.Info("adding", ghost.Nick, "to #"+mmchannel.Name)
 					srv.Add(ghost)
@@ -190,8 +188,7 @@ func (u *User) addUsersToChannels() {
 			if mmConnected {
 				mmuser.Username = mmuser.Username + "-" + u.MmTeam.Name
 			}
-			ghost := &User{Nick: mmuser.Username, User: mmuser.Id,
-				Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+			ghost := u.createMMUser(mmuser)
 			ghost.MmGhostUser = true
 			logger.Info("adding", ghost.Nick, "without a channel")
 			srv.Add(ghost)
@@ -257,7 +254,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	if u.MmUsers[data.UserId] == nil {
 		u.updateMMUsers()
 	}
-	ghost := u.createMMUser(u.MmUsers[data.UserId].Username, data.UserId)
+	ghost := u.createMMUser(u.MmUsers[data.UserId])
 	rcvchannel := u.getMMChannelName(data.ChannelId)
 	// direct message
 	if strings.Contains(rcvchannel, "__") {
@@ -303,7 +300,7 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 		return
 	}
 
-	ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+	ghost := u.createMMUser(u.MmUsers[rmsg.UserId])
 	if ghost == nil {
 		logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
 		return
@@ -328,7 +325,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 		ch.Join(u)
 		return
 	}
-	ghost := u.createMMUser(u.MmUsers[rmsg.UserId].Username, rmsg.UserId)
+	ghost := u.createMMUser(u.MmUsers[rmsg.UserId])
 	if ghost == nil {
 		logger.Debug("couldn't add user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
 		return
@@ -457,9 +454,7 @@ func (u *User) syncMMChannel(id string, name string) {
 
 		cghost, ok := srv.HasUser(d.Username)
 		if !ok {
-			ghost := &User{Nick: d.Username, User: d.Id,
-				Real: "ghost", Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
-
+			ghost := u.createMMUser(u.MmUsers[d.Id])
 			ghost.MmGhostUser = true
 			logger.Info("adding", ghost.Nick, "to #"+name)
 			srv.Add(ghost)

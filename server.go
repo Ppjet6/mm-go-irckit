@@ -3,6 +3,7 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,6 +337,49 @@ func (s *server) who(u *User, mask string, op bool) []*irc.Message {
 	return r
 }
 
+func (s *server) whois(u *User, who string) []*irc.Message {
+	endMsg := &irc.Message{
+		Prefix:   s.Prefix(),
+		Params:   []string{u.Nick},
+		Command:  irc.RPL_ENDOFWHOIS,
+		Trailing: "End of /WHOIS list.",
+	}
+
+	other, _ := s.HasUser(who)
+	var r []*irc.Message
+	r = append(r, &irc.Message{
+		Prefix:   s.Prefix(),
+		Params:   []string{u.Nick, other.Nick, other.User, other.Host, "*"},
+		Command:  irc.RPL_WHOISUSER,
+		Trailing: other.Real,
+	})
+
+	var chlist string
+	for _, ch := range other.Channels() {
+		chlist += ch.String() + " "
+	}
+
+	r = append(r, &irc.Message{
+		Prefix:   s.Prefix(),
+		Params:   []string{u.Nick, other.Nick},
+		Command:  irc.RPL_WHOISCHANNELS,
+		Trailing: chlist,
+	})
+
+	if _, ok := u.MmUsers[other.User]; ok {
+		idle := (model.GetMillis() - u.MmUsers[other.User].LastActivityAt) / 1000
+		r = append(r, &irc.Message{
+			Prefix:   s.Prefix(),
+			Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
+			Command:  irc.RPL_WHOISIDLE,
+			Trailing: "seconds idle, signon time",
+		})
+	}
+
+	r = append(r, endMsg)
+	return r
+}
+
 func (s *server) welcome(u *User) error {
 	err := u.Encode(
 		&irc.Message{
@@ -615,6 +659,25 @@ func (s *server) handle(u *User) {
 			}
 			opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
 			err = u.Encode(s.who(u, msg.Params[0], opFilter)...)
+		case irc.WHOIS:
+			if len(msg.Params) < 1 {
+				u.Encode(&irc.Message{
+					Prefix:  s.Prefix(),
+					Command: irc.ERR_NEEDMOREPARAMS,
+					Params:  []string{msg.Command},
+				})
+				continue
+			}
+			if _, ok := s.HasUser(msg.Params[0]); ok {
+				err = u.Encode(s.whois(u, msg.Params[0])...)
+			} else {
+				err = u.Encode(&irc.Message{
+					Prefix:   s.Prefix(),
+					Command:  irc.ERR_NOSUCHNICK,
+					Params:   msg.Params,
+					Trailing: "No such nick/channel",
+				})
+			}
 		case irc.ISON:
 			if len(msg.Params) < 1 {
 				u.Encode(&irc.Message{

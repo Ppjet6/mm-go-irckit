@@ -100,7 +100,7 @@ func (u *User) loginToMattermost() error {
 }
 
 func (u *User) createMMUser(mmuser *model.User) *User {
-	if ghost, ok := u.Srv.HasUser(mmuser.Nickname); ok {
+	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
 	}
 	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
@@ -275,7 +275,11 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 
 	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.getMMChannelName(data.ChannelId))
 	ch := u.Srv.Channel("#" + rcvchannel)
-	ch.Join(ghost)
+
+	// join if not in channel
+	if !ch.HasUser(ghost) {
+		ch.Join(ghost)
+	}
 	msgs := strings.Split(data.Message, "\n")
 	for _, m := range msgs {
 		ch.Message(ghost, m)

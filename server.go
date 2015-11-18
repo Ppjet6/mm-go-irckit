@@ -608,7 +608,7 @@ func (s *server) handle(u *User) {
 					Command: irc.ERR_NEEDMOREPARAMS,
 					Params:  []string{msg.Command},
 				})
-			} else if s.config.InviteOnly {
+			} else if s.config.InviteOnly || u.MmUser == nil {
 				err = u.Encode(&irc.Message{
 					Prefix:   s.Prefix(),
 					Command:  irc.ERR_INVITEONLYCHAN,

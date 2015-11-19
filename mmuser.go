@@ -167,9 +167,10 @@ func (u *User) addUsersToChannels() {
 				return
 			}
 			logger.Debugf("%#v", u.MmChannels.Members[mmchannel.Id])
-			for _, id := range postlist.Order {
-				for _, post := range strings.Split(postlist.Posts[id].Message, "\n") {
-					ch.SpoofMessage(u.MmUsers[postlist.Posts[id].UserId].Username, post)
+			// traverse the order in reverse
+			for i := len(postlist.Order) - 1; i >= 0; i-- {
+				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+					ch.SpoofMessage(u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username, post)
 				}
 			}
 			u.updateMMLastViewed(mmchannel.Id)

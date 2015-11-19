@@ -359,6 +359,13 @@ func (u *User) getMMChannelName(id string) string {
 			return channel.Name
 		}
 	}
+	// not found? could be a new direct message from mattermost. Try to update and check again
+	u.updateMMChannels()
+	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
+		if channel.Id == id {
+			return channel.Name
+		}
+	}
 	return ""
 }
 

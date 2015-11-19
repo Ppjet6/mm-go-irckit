@@ -534,7 +534,7 @@ func (u *User) updateMMUsers() error {
 }
 
 func (u *User) isValidMMServer(server string) bool {
-	if u.Cfg.AllowedServers != nil {
+	if len(u.Cfg.AllowedServers) > 0 {
 		logger.Debug("allowedservers:", u.Cfg.AllowedServers)
 		for _, srv := range u.Cfg.AllowedServers {
 			if srv == server {

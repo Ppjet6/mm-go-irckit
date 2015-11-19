@@ -222,6 +222,8 @@ type MmCredentials struct {
 
 type MmCfg struct {
 	AllowedServers []string
+	DefaultServer  string
+	DefaultTeam    string
 }
 
 func (u *User) WsReceiver() {
@@ -434,19 +436,62 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands := strings.Fields(msg)
 	switch commands[0] {
-	case "LOGIN":
+	case "LOGIN", "login":
 		{
+			cred := &MmCredentials{}
+			datalen := 5
+			if u.Cfg.DefaultTeam != "" {
+				cred.Team = u.Cfg.DefaultTeam
+				datalen--
+			}
+			if u.Cfg.DefaultServer != "" {
+				cred.Server = u.Cfg.DefaultServer
+				datalen--
+			}
 			data := strings.Split(msg, " ")
-			if len(data) != 5 {
+			if len(data) == datalen {
+				cred.Pass = data[len(data)-1]
+				cred.Login = data[len(data)-2]
+				// no default server or team specified
+				if cred.Server == "" && cred.Team == "" {
+					cred.Server = data[len(data)-4]
+				}
+				if cred.Team == "" {
+					cred.Team = data[len(data)-3]
+				}
+				if cred.Server == "" {
+					cred.Server = data[len(data)-3]
+				}
+
+			}
+
+			// incorrect arguments
+			if len(data) != datalen {
+				// no server or team
+				if cred.Team != "" && cred.Server != "" {
+					u.MsgUser(toUser, "need LOGIN <login> <pass>")
+					return
+				}
+				// server missing
+				if cred.Team != "" {
+					u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
+					return
+				}
+				// team missing
+				if cred.Server != "" {
+					u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
+					return
+				}
 				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 				return
 			}
-			if !u.isValidMMServer(data[1]) {
-				u.MsgUser(toUser, "not allowed to connect to "+data[1])
+
+			if !u.isValidMMServer(cred.Server) {
+				u.MsgUser(toUser, "not allowed to connect to "+cred.Server)
 				return
 			}
-			u.Credentials = &MmCredentials{Server: data[1], Team: data[2], Login: data[3], Pass: data[4]}
-			//err := u.loginToMattermost(data[1], data[2], data[3], data[4])
+
+			u.Credentials = cred
 			err := u.loginToMattermost()
 			if err != nil {
 				u.MsgUser(toUser, err.Error())
@@ -457,7 +502,8 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 
 		}
 	default:
-		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+		u.MsgUser(toUser, "possible commands: LOGIN")
+		u.MsgUser(toUser, "<command> help for more info")
 	}
 
 }

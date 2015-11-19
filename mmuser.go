@@ -13,13 +13,14 @@ import (
 	"github.com/sorcix/irc"
 )
 
-func NewUserMM(c net.Conn, srv Server) *User {
+func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u := NewUser(&conn{
 		Conn:    c,
 		Encoder: irc.NewEncoder(c),
 		Decoder: irc.NewDecoder(c),
 	})
 	u.Srv = srv
+	u.MmInfo.Cfg = cfg
 
 	// used for login
 	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
@@ -209,6 +210,7 @@ type MmInfo struct {
 	MmMoreChannels *model.ChannelList
 	MmTeam         *model.Team
 	Credentials    *MmCredentials
+	Cfg            *MmCfg
 }
 
 type MmCredentials struct {
@@ -216,6 +218,10 @@ type MmCredentials struct {
 	Team   string
 	Pass   string
 	Server string
+}
+
+type MmCfg struct {
+	AllowedServers []string
 }
 
 func (u *User) WsReceiver() {
@@ -428,6 +434,10 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 				return
 			}
+			if !u.isValidMMServer(data[1]) {
+				u.MsgUser(toUser, "not allowed to connect to "+data[1])
+				return
+			}
 			u.Credentials = &MmCredentials{Server: data[1], Team: data[2], Login: data[3], Pass: data[4]}
 			//err := u.loginToMattermost(data[1], data[2], data[3], data[4])
 			err := u.loginToMattermost()
@@ -521,4 +531,17 @@ func (u *User) updateMMUsers() error {
 	mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
 	u.MmUsers = mmusers.Data.(map[string]*model.User)
 	return nil
+}
+
+func (u *User) isValidMMServer(server string) bool {
+	if u.Cfg.AllowedServers != nil {
+		logger.Debug("allowedservers:", u.Cfg.AllowedServers)
+		for _, srv := range u.Cfg.AllowedServers {
+			if srv == server {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }

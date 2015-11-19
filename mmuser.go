@@ -285,6 +285,14 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	for _, m := range msgs {
 		ch.Message(ghost, m)
 	}
+
+	if len(data.Filenames) > 0 {
+		logger.Debugf("files detected")
+		for _, fname := range data.Filenames {
+			logger.Debug("filename: ", fname)
+			ch.Message(ghost, "download file - https://"+u.Credentials.Server+"/api/v1/files/get"+fname)
+		}
+	}
 	logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
 	logger.Debugf("%#v", data)
 

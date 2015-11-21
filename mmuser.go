@@ -501,8 +501,27 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			u.MsgUser(toUser, "login OK")
 
 		}
+	case "SEARCH", "search":
+		{
+			postlist := u.searchMMPosts(strings.Join(commands[1:], " "))
+			if postlist == nil || len(postlist.Order) == 0 {
+				u.MsgUser(toUser, "no results")
+				return
+			}
+			for i := len(postlist.Order) - 1; i >= 0; i-- {
+				timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
+				channelname := u.getMMChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
+				u.MsgUser(toUser, "#"+channelname+" <"+u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
+				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
+				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+					u.MsgUser(toUser, post)
+				}
+				u.MsgUser(toUser, "")
+				u.MsgUser(toUser, "")
+			}
+		}
 	default:
-		u.MsgUser(toUser, "possible commands: LOGIN")
+		u.MsgUser(toUser, "possible commands: LOGIN, SEARCH")
 		u.MsgUser(toUser, "<command> help for more info")
 	}
 
@@ -558,6 +577,14 @@ func (u *User) joinMMChannel(channel string) error {
 
 func (u *User) getMMPostsSince(channelId string, time int64) *model.PostList {
 	res, err := u.MmClient.GetPostsSince(channelId, time)
+	if err != nil {
+		return nil
+	}
+	return res.Data.(*model.PostList)
+}
+
+func (u *User) searchMMPosts(query string) *model.PostList {
+	res, err := u.MmClient.SearchPosts(query)
 	if err != nil {
 		return nil
 	}

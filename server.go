@@ -708,6 +708,11 @@ func (s *server) handle(u *User) {
 						msg.Trailing = msg.Params[1]
 					}
 				}
+				// CTCP ACTION (/me)
+				if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
+					msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
+					msg.Trailing = "*" + msg.Trailing + "*"
+				}
 				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
 				u.MmClient.CreatePost(post)
 				toChan.Message(u, msg.Trailing)

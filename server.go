@@ -501,6 +501,34 @@ func (s *server) list(u *User) []*irc.Message {
 	return r
 }
 
+// handle channel/user mode
+func (s *server) mode(u *User, channel string, modetype string) []*irc.Message {
+	r := []*irc.Message{}
+	switch modetype {
+	case "":
+		{
+			msg := irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_CHANNELMODEIS,
+				Params:   []string{u.Nick, channel},
+				Trailing: " " + " ",
+			}
+			r = append(r, &msg)
+		}
+	case "b":
+		{
+			msg := irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_ENDOFBANLIST,
+				Params:   []string{u.Nick, channel},
+				Trailing: "End of channel ban list",
+			}
+			r = append(r, &msg)
+		}
+	}
+	return r
+}
+
 // names lists all names for a given channel
 func (s *server) names(u *User, channels ...string) []*irc.Message {
 	// TODO: Support full list?
@@ -677,6 +705,20 @@ func (s *server) handle(u *User) {
 					Params:   msg.Params,
 					Trailing: "No such nick/channel",
 				})
+			}
+		case irc.MODE:
+			if len(msg.Params) < 1 {
+				u.Encode(&irc.Message{
+					Prefix:  s.Prefix(),
+					Command: irc.ERR_NEEDMOREPARAMS,
+					Params:  []string{msg.Command},
+				})
+				continue
+			}
+			if len(msg.Params) > 1 {
+				u.Encode(s.mode(u, msg.Params[0], msg.Params[1])...)
+			} else {
+				u.Encode(s.mode(u, msg.Params[0], "")...)
 			}
 		case irc.ISON:
 			if len(msg.Params) < 1 {

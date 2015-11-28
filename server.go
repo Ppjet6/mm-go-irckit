@@ -366,6 +366,7 @@ func (s *server) whois(u *User, who string) []*irc.Message {
 		Trailing: chlist,
 	})
 
+	u.updateMMUsers()
 	if _, ok := u.MmUsers[other.User]; ok {
 		idle := (model.GetMillis() - u.MmUsers[other.User].LastActivityAt) / 1000
 		r = append(r, &irc.Message{

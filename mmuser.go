@@ -256,17 +256,28 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
 	logger.Debug("receiving userid", data.UserId)
 	if data.UserId == u.MmUser.Id {
-		// our own message
-		return
+		// our own message - http://www.fileformat.info/info/unicode/char/180e/fontsupport.htm
+		if strings.Contains(data.Message, "᠎") {
+			logger.Debugf("message is sent from IRC, contains unicode, not relaying", data.Message)
+			return
+		}
 	}
 	// we don't have the user, refresh the userlist
 	if u.MmUsers[data.UserId] == nil {
 		u.updateMMUsers()
 	}
 	ghost := u.createMMUser(u.MmUsers[data.UserId])
+	// our own message, set our IRC self as user, not our mattermost self
+	if data.UserId == u.MmUser.Id {
+		ghost = u
+	}
 	rcvchannel := u.getMMChannelName(data.ChannelId)
 	// direct message
 	if strings.Contains(rcvchannel, "__") {
+		// our own message, ignore because we can't handle/fake those on IRC
+		if data.UserId == u.MmUser.Id {
+			return
+		}
 		logger.Debug("direct message")
 		var rcvuser string
 		rcvusers := strings.Split(rcvchannel, "__")

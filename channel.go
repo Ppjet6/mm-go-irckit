@@ -107,9 +107,10 @@ func (ch *channel) Message(from *User, text string) {
 	ch.mu.RLock()
 	for to := range ch.usersIdx {
 		// TODO: Check err and kick failures?
-		if to == from {
-			continue
-		}
+		/*		if to == from {
+					continue
+				}
+		*/
 		to.Encode(msg)
 	}
 	ch.mu.RUnlock()

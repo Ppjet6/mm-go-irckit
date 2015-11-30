@@ -742,7 +742,7 @@ func (s *server) handle(u *User) {
 			}
 
 			query := msg.Params[0]
-			if toChan, exists := s.HasChannel(query); exists {
+			if _, exists := s.HasChannel(query); exists {
 				p := strings.Replace(msg.Params[0], "#", "", -1)
 				msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
 				// fix non-rfc clients
@@ -756,10 +756,9 @@ func (s *server) handle(u *User) {
 					msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
 					msg.Trailing = "*" + msg.Trailing + "*"
 				}
+				msg.Trailing += "᠎"
 				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
 				u.MmClient.CreatePost(post)
-				toChan.Message(u, msg.Trailing)
-				s.Publish(&event{ChanMsgEvent, s, toChan, u, msg})
 			} else if toUser, exists := s.HasUser(query); exists {
 				if query == "mattermost" {
 					go u.handleMMServiceBot(toUser, msg.Trailing)

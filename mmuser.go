@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -531,8 +532,39 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, "")
 			}
 		}
+	case "SCROLLBACK", "scrollback", "sb":
+		{
+			if len(commands) != 3 {
+				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
+				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+				return
+			}
+			limit, err := strconv.Atoi(commands[2])
+			if err != nil {
+				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
+				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+				return
+			}
+			if !strings.Contains(commands[1], "#") {
+				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
+				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+				return
+			}
+			commands[1] = strings.Replace(commands[1], "#", "", -1)
+			postlist := u.getMMPosts(u.getMMChannelId(commands[1]), limit)
+			if postlist == nil || len(postlist.Order) == 0 {
+				u.MsgUser(toUser, "no results")
+				return
+			}
+			for i := len(postlist.Order) - 1; i >= 0; i-- {
+				nick := u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username
+				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+					u.MsgUser(toUser, "<"+nick+"> "+post)
+				}
+			}
+		}
 	default:
-		u.MsgUser(toUser, "possible commands: LOGIN, SEARCH")
+		u.MsgUser(toUser, "possible commands: LOGIN, SEARCH, SCROLLBACK")
 		u.MsgUser(toUser, "<command> help for more info")
 	}
 
@@ -596,6 +628,14 @@ func (u *User) getMMPostsSince(channelId string, time int64) *model.PostList {
 
 func (u *User) searchMMPosts(query string) *model.PostList {
 	res, err := u.MmClient.SearchPosts(query)
+	if err != nil {
+		return nil
+	}
+	return res.Data.(*model.PostList)
+}
+
+func (u *User) getMMPosts(channelId string, limit int) *model.PostList {
+	res, err := u.MmClient.GetPosts(channelId, 0, limit, "")
 	if err != nil {
 		return nil
 	}

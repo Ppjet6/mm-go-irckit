@@ -381,6 +381,13 @@ func (s *server) whois(u *User, who string) []*irc.Message {
 	return r
 }
 
+func (s *server) topic(u *User, channelname string, header string) {
+	ch := s.Channel(channelname)
+	ch.Topic(u, header)
+	channelname = strings.Replace(channelname, "#", "", -1)
+	u.updateMMChannelHeader(u.getMMChannelId(channelname), header)
+}
+
 func (s *server) welcome(u *User) error {
 	err := u.Encode(
 		&irc.Message{
@@ -657,6 +664,7 @@ func (s *server) handle(u *User) {
 						continue
 					}
 					ch := s.Channel(channel)
+					ch.Topic(u, u.getMMChannelHeader(u.getMMChannelId(strings.Replace(channel, "#", "", -1))))
 					err = ch.Join(u)
 					if err == nil {
 						s.Publish(&event{JoinEvent, s, ch, u, msg})
@@ -677,6 +685,16 @@ func (s *server) handle(u *User) {
 			err = u.Encode(s.names(u, msg.Params[0])...)
 		case irc.LIST:
 			u.Encode(s.list(u)...)
+		case irc.TOPIC:
+			if len(msg.Params) < 1 {
+				u.Encode(&irc.Message{
+					Prefix:  s.Prefix(),
+					Command: irc.ERR_NEEDMOREPARAMS,
+					Params:  []string{msg.Command},
+				})
+				continue
+			}
+			s.topic(u, msg.Params[0], msg.Trailing)
 		case irc.WHO:
 			if len(msg.Params) < 1 {
 				u.Encode(&irc.Message{

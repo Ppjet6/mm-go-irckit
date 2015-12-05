@@ -135,6 +135,7 @@ func (u *User) addUsersToChannels() {
 
 			// join ourself to all channels
 			ch := srv.Channel("#" + mmchannel.Name)
+			ch.Topic(u, u.getMMChannelHeader(mmchannel.Id))
 			ch.Join(u)
 
 			// add everyone on the MM channel to the IRC channel
@@ -355,6 +356,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 	// add ourselves to the channel
 	if rmsg.UserId == u.MmUser.Id {
 		logger.Debug("ACTION_USER_ADDED adding myself to", u.getMMChannelName(rmsg.ChannelId), rmsg.ChannelId)
+		ch.Topic(u, u.getMMChannelHeader(rmsg.ChannelId))
 		ch.Join(u)
 		return
 	}
@@ -365,6 +367,15 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 	}
 	ch.Join(ghost)
 	return
+}
+
+func (u *User) getMMChannelHeader(id string) string {
+	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
+		if channel.Id == id {
+			return channel.Header
+		}
+	}
+	return ""
 }
 
 func (u *User) getMMChannelName(id string) string {
@@ -587,6 +598,7 @@ func (u *User) syncMMChannel(id string, name string) {
 		if d.Id == u.MmUser.Id {
 			ch := srv.Channel("#" + name)
 			logger.Debug("syncMMChannel adding myself to ", name, id)
+			ch.Topic(u, u.getMMChannelHeader(id))
 			ch.Join(u)
 		}
 
@@ -640,6 +652,17 @@ func (u *User) getMMPosts(channelId string, limit int) *model.PostList {
 		return nil
 	}
 	return res.Data.(*model.PostList)
+}
+
+func (u *User) updateMMChannelHeader(channelId string, header string) {
+	data := make(map[string]string)
+	data["channel_id"] = channelId
+	data["channel_header"] = header
+	logger.Debugf("updating channelheader %#v, %#v", channelId, header)
+	_, err := u.MmClient.UpdateChannelHeader(data)
+	if err != nil {
+		logger.Info(err)
+	}
 }
 
 func (u *User) updateMMLastViewed(channelId string) {

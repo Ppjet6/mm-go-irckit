@@ -486,19 +486,20 @@ func (s *server) list(u *User) []*irc.Message {
 		Trailing: "Channel Users Topic",
 	}
 	r = append(r, &msg)
-
-	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
-		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
-		if strings.Contains(channel.Name, "__") {
-			continue
+	if u.MmUser != nil {
+		for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
+			// FIXME: This needs to be broken up into multiple messages to fit <510 chars
+			if strings.Contains(channel.Name, "__") {
+				continue
+			}
+			msg := irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_LIST,
+				Params:   []string{u.Nick},
+				Trailing: channel.Name + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
+			}
+			r = append(r, &msg)
 		}
-		msg := irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_LIST,
-			Params:   []string{u.Nick},
-			Trailing: channel.Name + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
-		}
-		r = append(r, &msg)
 	}
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),

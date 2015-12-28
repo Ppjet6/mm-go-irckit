@@ -42,7 +42,11 @@ func (u *User) loginToMattermost() error {
 	}
 	// login to mattermost
 	//u.Credentials = &MmCredentials{Server: url, Team: team, Login: email, Pass: pass}
-	MmClient := model.NewClient("https://" + u.Credentials.Server)
+	mmurl := "https://" + u.Credentials.Server
+	if u.Cfg.Insecure {
+		mmurl = "http://" + u.Credentials.Server
+	}
+	MmClient := model.NewClient(mmurl)
 	var myinfo *model.Result
 	var appErr *model.AppError
 	for {
@@ -69,6 +73,10 @@ func (u *User) loginToMattermost() error {
 
 	// setup websocket connection
 	wsurl := "wss://" + u.Credentials.Server + "/api/v1/websocket"
+	if u.Cfg.Insecure {
+		wsurl = "ws://" + u.Credentials.Server + "/api/v1/websocket"
+	}
+
 	header := http.Header{}
 	header.Set(model.HEADER_AUTH, "BEARER "+MmClient.AuthToken)
 
@@ -226,6 +234,7 @@ type MmCfg struct {
 	AllowedServers []string
 	DefaultServer  string
 	DefaultTeam    string
+	Insecure       bool
 }
 
 func (u *User) WsReceiver() {

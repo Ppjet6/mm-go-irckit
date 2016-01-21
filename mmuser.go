@@ -136,7 +136,7 @@ func (u *User) addUsersToChannels() {
 		}
 		<-throttle
 		go func(mmchannel *model.Channel) {
-			edata, _ := u.MmClient.GetChannelExtraInfo(mmchannel.Id, "")
+			edata, _ := u.MmClient.GetChannelExtraInfo(mmchannel.Id, -1, "")
 			if mmConnected {
 				mmchannel.Name = mmchannel.Name + "-" + u.MmTeam.Name
 			}
@@ -598,7 +598,7 @@ func (u *User) syncMMChannel(id string, name string) {
 		//mmConnected = true
 	}
 
-	edata, _ := u.MmClient.GetChannelExtraInfo(id, "")
+	edata, _ := u.MmClient.GetChannelExtraInfo(id, -1, "")
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		if mmConnected {
 			d.Username = d.Username + "-" + u.MmTeam.Name

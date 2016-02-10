@@ -853,6 +853,12 @@ func (s *server) handshake(u *User) error {
 			continue
 		}
 
+		// apparently NICK message can have a : prefix on connection
+		// https://github.com/42wim/matterircd/issues/32
+		if msg.Command == irc.NICK && msg.Trailing != "" {
+			msg.Params = append(msg.Params, msg.Trailing)
+		}
+
 		if len(msg.Params) < 1 {
 			u.Encode(&irc.Message{
 				Prefix:  s.Prefix(),

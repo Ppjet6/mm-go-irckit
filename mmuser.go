@@ -535,6 +535,10 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 		}
 	case "SEARCH", "search":
 		{
+			if u.MmClient == nil {
+				u.MsgUser(toUser, "Can not search, you're not logged in. Use LOGIN first.")
+				return
+			}
 			postlist := u.searchMMPosts(strings.Join(commands[1:], " "))
 			if postlist == nil || len(postlist.Order) == 0 {
 				u.MsgUser(toUser, "no results")

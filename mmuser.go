@@ -109,6 +109,17 @@ func (u *User) loginToMattermost() error {
 	return nil
 }
 
+func (u *User) logoutFromMattermost() error {
+	logger.Debug("LOGOUT")
+	u.MmClient.Logout()
+	u.MmWsQuit = true
+	u.MmWsClient.Close()
+	u.MmWsClient.UnderlyingConn().Close()
+	u.MmWsClient = nil
+	u.Srv.Logout(u)
+	return nil
+}
+
 func (u *User) createMMUser(mmuser *model.User) *User {
 	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
@@ -213,6 +224,7 @@ type MmInfo struct {
 	MmGhostUser    bool
 	MmClient       *model.Client
 	MmWsClient     *websocket.Conn
+	MmWsQuit       bool
 	Srv            Server
 	MmUsers        map[string]*model.User
 	MmUser         *model.User
@@ -240,8 +252,17 @@ type MmCfg struct {
 func (u *User) WsReceiver() {
 	var rmsg model.Message
 	for {
+		if u.MmWsQuit {
+			logger.Debug("exiting WsReceiver")
+			return
+		}
+
 		if err := u.MmWsClient.ReadJSON(&rmsg); err != nil {
 			logger.Critical(err)
+			if u.MmWsQuit {
+				logger.Debug("exiting WsReceiver - MmWsQuit - ReadJSON")
+				return
+			}
 			// did the user quit
 			if _, ok := u.Srv.HasUser(u.Nick); !ok {
 				logger.Debug("user has quit, not reconnecting")
@@ -468,8 +489,15 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands := strings.Fields(msg)
 	switch commands[0] {
+	case "LOGOUT", "logout":
+		{
+			u.logoutFromMattermost()
+		}
 	case "LOGIN", "login":
 		{
+			if u.MmWsClient != nil {
+				u.logoutFromMattermost()
+			}
 			cred := &MmCredentials{}
 			datalen := 5
 			if u.Cfg.DefaultTeam != "" {

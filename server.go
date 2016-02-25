@@ -65,6 +65,7 @@ type Server interface {
 
 	Add(u *User) bool
 	Handle(u *User)
+	Logout(u *User)
 }
 
 // ServerConfig produces a Server setup with configuration options.
@@ -628,7 +629,7 @@ func (s *server) handle(u *User) {
 			})
 			s.Publish(&event{QuitEvent, s, nil, u, msg})
 			if u.MmWsClient != nil {
-				logger.Debugf("close client %#v", u.MmWsClient.Close())
+				u.logoutFromMattermost()
 			}
 			return
 		case irc.PING:

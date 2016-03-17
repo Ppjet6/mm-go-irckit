@@ -1,15 +1,13 @@
 package irckit
 
 import (
-	"errors"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/42wim/matterbridge-plus/matterclient"
 	"github.com/gorilla/websocket"
-	"github.com/jpillora/backoff"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
@@ -34,88 +32,20 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	return u
 }
 
-func (u *User) loginToMattermost() error {
-	b := &backoff.Backoff{
-		Min:    time.Second,
-		Max:    5 * time.Minute,
-		Jitter: true,
-	}
-	// login to mattermost
-	//u.Credentials = &MmCredentials{Server: url, Team: team, Login: email, Pass: pass}
-	mmurl := "https://" + u.Credentials.Server
-	if u.Cfg.Insecure {
-		mmurl = "http://" + u.Credentials.Server
-	}
-	MmClient := model.NewClient(mmurl)
-	var myinfo *model.Result
-	var appErr *model.AppError
-	for {
-		logger.Debug("retrying login", u.Credentials.Team, u.Credentials.Login, u.Credentials.Server)
-		myinfo, appErr = MmClient.LoginByEmail(u.Credentials.Team, u.Credentials.Login, u.Credentials.Pass)
-		if appErr != nil {
-			d := b.Duration()
-			if !strings.Contains(appErr.DetailedError, "connection refused") &&
-				!strings.Contains(appErr.DetailedError, "invalid character") {
-				return errors.New(appErr.Message)
-			}
-			logger.Infof("LOGIN: %s, reconnecting in %s", appErr, d)
-			time.Sleep(d)
-			continue
-		}
-		break
-	}
-	// reset timer
-	b.Reset()
-	u.MmUser = myinfo.Data.(*model.User)
-
-	myinfo, _ = MmClient.GetMyTeam("")
-	u.MmTeam = myinfo.Data.(*model.Team)
-
-	// setup websocket connection
-	wsurl := "wss://" + u.Credentials.Server + "/api/v1/websocket"
-	if u.Cfg.Insecure {
-		wsurl = "ws://" + u.Credentials.Server + "/api/v1/websocket"
-	}
-
-	header := http.Header{}
-	header.Set(model.HEADER_AUTH, "BEARER "+MmClient.AuthToken)
-
-	var WsClient *websocket.Conn
-	var err error
-	for {
-		WsClient, _, err = websocket.DefaultDialer.Dial(wsurl, header)
-		if err != nil {
-			d := b.Duration()
-			logger.Infof("WSS: %s, reconnecting in %s", err, d)
-			time.Sleep(d)
-			continue
-		}
-		break
-	}
-	b.Reset()
-
-	u.MmClient = MmClient
-	u.MmWsClient = WsClient
-
-	// populating users
-	u.updateMMUsers()
-
-	// populating channels
-	u.updateMMChannels()
-
-	// fetch users and channels from mattermost
-	u.addUsersToChannels()
-
-	return nil
+func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
+	mc := matterclient.New(u.Credentials.Login, u.Credentials.Pass, u.Credentials.Team, u.Credentials.Server)
+	mc.Login()
+	u.MmWsQuit = false
+	return mc, nil
 }
 
 func (u *User) logoutFromMattermost() error {
 	logger.Debug("LOGOUT")
-	u.MmClient.Logout()
+	u.mc.Client.Logout()
 	u.MmWsQuit = true
-	u.MmWsClient.Close()
-	u.MmWsClient.UnderlyingConn().Close()
-	u.MmWsClient = nil
+	u.mc.WsClient.Close()
+	u.mc.WsClient.UnderlyingConn().Close()
+	u.mc.WsClient = nil
 	u.Srv.Logout(u)
 	return nil
 }
@@ -124,7 +54,7 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
 	}
-	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.MmClient.Url, channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	return ghost
 }
@@ -139,7 +69,7 @@ func (u *User) addUsersToChannels() {
 	rate := time.Second / 1
 	throttle := time.Tick(rate)
 
-	for _, mmchannel := range u.MmChannels.Channels {
+	for _, mmchannel := range u.mc.Channels.Channels {
 
 		// exclude direct messages
 		if strings.Contains(mmchannel.Name, "__") {
@@ -147,29 +77,29 @@ func (u *User) addUsersToChannels() {
 		}
 		<-throttle
 		go func(mmchannel *model.Channel) {
-			edata, _ := u.MmClient.GetChannelExtraInfo(mmchannel.Id, -1, "")
+			edata, _ := u.mc.Client.GetChannelExtraInfo(mmchannel.Id, -1, "")
 			if mmConnected {
-				mmchannel.Name = mmchannel.Name + "-" + u.MmTeam.Name
+				mmchannel.Name = mmchannel.Name + "-" + u.mc.Team.Name
 			}
 
 			// join ourself to all channels
 			ch := srv.Channel("#" + mmchannel.Name)
-			ch.Topic(u, u.getMMChannelHeader(mmchannel.Id))
+			ch.Topic(u, u.mc.GetChannelHeader(mmchannel.Id))
 			ch.Join(u)
 
 			// add everyone on the MM channel to the IRC channel
 			for _, d := range edata.Data.(*model.ChannelExtra).Members {
 				if mmConnected {
-					d.Username = d.Username + "-" + u.MmTeam.Name
+					d.Username = d.Username + "-" + u.mc.Team.Name
 				}
 				// already joined
-				if d.Id == u.MmUser.Id {
+				if d.Id == u.mc.User.Id {
 					continue
 				}
 
 				cghost, ok := srv.HasUser(d.Username)
 				if !ok {
-					ghost := u.createMMUser(u.MmUsers[d.Id])
+					ghost := u.createMMUser(u.mc.Users[d.Id])
 					ghost.MmGhostUser = true
 					logger.Info("adding", ghost.Nick, "to #"+mmchannel.Name)
 					srv.Add(ghost)
@@ -183,33 +113,33 @@ func (u *User) addUsersToChannels() {
 			}
 
 			// post everything to the channel you haven't seen yet
-			postlist := u.getMMPostsSince(mmchannel.Id, u.MmChannels.Members[mmchannel.Id].LastViewedAt)
+			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
 			if postlist == nil {
 				logger.Errorf("something wrong with getMMPostsSince")
 				return
 			}
-			logger.Debugf("%#v", u.MmChannels.Members[mmchannel.Id])
+			logger.Debugf("%#v", u.mc.Channels.Members[mmchannel.Id])
 			// traverse the order in reverse
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					ch.SpoofMessage(u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username, post)
+					ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
 				}
 			}
-			u.updateMMLastViewed(mmchannel.Id)
+			u.mc.UpdateLastViewed(mmchannel.Id)
 
 		}(mmchannel)
 	}
 
 	// add all users, also who are not on channels
-	for _, mmuser := range u.MmUsers {
+	for _, mmuser := range u.mc.Users {
 		// do not add our own nick
-		if mmuser.Id == u.MmUser.Id {
+		if mmuser.Id == u.mc.User.Id {
 			continue
 		}
 		_, ok := srv.HasUser(mmuser.Username)
 		if !ok {
 			if mmConnected {
-				mmuser.Username = mmuser.Username + "-" + u.MmTeam.Name
+				mmuser.Username = mmuser.Username + "-" + u.mc.Team.Name
 			}
 			ghost := u.createMMUser(mmuser)
 			ghost.MmGhostUser = true
@@ -233,6 +163,7 @@ type MmInfo struct {
 	MmTeam         *model.Team
 	Credentials    *MmCredentials
 	Cfg            *MmCfg
+	mc             *matterclient.MMClient
 }
 
 type MmCredentials struct {
@@ -256,8 +187,8 @@ func (u *User) WsReceiver() {
 			logger.Debug("exiting WsReceiver")
 			return
 		}
-
-		if err := u.MmWsClient.ReadJSON(&rmsg); err != nil {
+		logger.Debug("in WsReceiver")
+		if err := u.mc.WsClient.ReadJSON(&rmsg); err != nil {
 			logger.Critical(err)
 			if u.MmWsQuit {
 				logger.Debug("exiting WsReceiver - MmWsQuit - ReadJSON")
@@ -266,11 +197,12 @@ func (u *User) WsReceiver() {
 			// did the user quit
 			if _, ok := u.Srv.HasUser(u.Nick); !ok {
 				logger.Debug("user has quit, not reconnecting")
-				u.MmWsClient.Close()
+				u.mc.WsClient.Close()
 				return
 			}
 			// reconnect
-			u.loginToMattermost()
+			u.mc, _ = u.loginToMattermost()
+			u.addUsersToChannels()
 		}
 		logger.Debugf("WsReceiver: %#v", rmsg)
 		switch rmsg.Action {
@@ -287,7 +219,7 @@ func (u *User) WsReceiver() {
 func (u *User) handleWsActionPost(rmsg *model.Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
 	logger.Debug("receiving userid", data.UserId)
-	if data.UserId == u.MmUser.Id {
+	if data.UserId == u.mc.User.Id {
 		// our own message - http://www.fileformat.info/info/unicode/char/180e/fontsupport.htm
 		if strings.Contains(data.Message, "᠎") {
 			logger.Debugf("message is sent from IRC, contains unicode, not relaying", data.Message)
@@ -295,28 +227,28 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 		}
 	}
 	// we don't have the user, refresh the userlist
-	if u.MmUsers[data.UserId] == nil {
-		u.updateMMUsers()
+	if u.mc.Users[data.UserId] == nil {
+		u.mc.UpdateUsers()
 	}
-	ghost := u.createMMUser(u.MmUsers[data.UserId])
+	ghost := u.createMMUser(u.mc.Users[data.UserId])
 	// our own message, set our IRC self as user, not our mattermost self
-	if data.UserId == u.MmUser.Id {
+	if data.UserId == u.mc.User.Id {
 		ghost = u
 	}
-	rcvchannel := u.getMMChannelName(data.ChannelId)
+	rcvchannel := u.mc.GetChannelName(data.ChannelId)
 	// direct message
 	if strings.Contains(rcvchannel, "__") {
 		// our own message, ignore because we can't handle/fake those on IRC
-		if data.UserId == u.MmUser.Id {
+		if data.UserId == u.mc.User.Id {
 			return
 		}
 		logger.Debug("direct message")
 		var rcvuser string
 		rcvusers := strings.Split(rcvchannel, "__")
-		if rcvusers[0] != u.MmUser.Id {
-			rcvuser = u.MmUsers[rcvusers[0]].Username
+		if rcvusers[0] != u.mc.User.Id {
+			rcvuser = u.mc.Users[rcvusers[0]].Username
 		} else {
-			rcvuser = u.MmUsers[rcvusers[1]].Username
+			rcvuser = u.mc.Users[rcvusers[1]].Username
 		}
 		msgs := strings.Split(data.Message, "\n")
 		for _, m := range msgs {
@@ -325,7 +257,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 		return
 	}
 
-	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.getMMChannelName(data.ChannelId))
+	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.mc.GetChannelName(data.ChannelId))
 	ch := u.Srv.Channel("#" + rcvchannel)
 
 	// join if not in channel
@@ -344,29 +276,29 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			ch.Message(ghost, "download file - https://"+u.Credentials.Server+"/api/v1/files/get"+fname)
 		}
 	}
-	logger.Debug(u.MmUsers[data.UserId].Username, ":", data.Message)
+	logger.Debug(u.mc.Users[data.UserId].Username, ":", data.Message)
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
-	u.updateMMLastViewed(data.ChannelId)
+	u.mc.UpdateLastViewed(data.ChannelId)
 	return
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
-	if u.MmUsers[rmsg.UserId] == nil {
-		u.updateMMUsers()
+	if u.mc.Users[rmsg.UserId] == nil {
+		u.mc.UpdateUsers()
 	}
-	ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
 
 	// remove ourselves from the channel
-	if rmsg.UserId == u.MmUser.Id {
+	if rmsg.UserId == u.mc.User.Id {
 		ch.Part(u, "")
 		return
 	}
 
-	ghost := u.createMMUser(u.MmUsers[rmsg.UserId])
+	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
 	if ghost == nil {
-		logger.Debug("couldn't remove user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+		logger.Debug("couldn't remove user", rmsg.UserId, u.mc.Users[rmsg.UserId].Username)
 		return
 	}
 	ch.Part(ghost, "")
@@ -374,72 +306,29 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 }
 
 func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
-	if u.getMMChannelName(rmsg.ChannelId) == "" {
-		u.updateMMChannels()
+	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
+		u.mc.UpdateChannels()
 	}
 
-	if u.MmUsers[rmsg.UserId] == nil {
-		u.updateMMUsers()
+	if u.mc.Users[rmsg.UserId] == nil {
+		u.mc.UpdateUsers()
 	}
 
-	ch := u.Srv.Channel("#" + u.getMMChannelName(rmsg.ChannelId))
+	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
 	// add ourselves to the channel
-	if rmsg.UserId == u.MmUser.Id {
-		logger.Debug("ACTION_USER_ADDED adding myself to", u.getMMChannelName(rmsg.ChannelId), rmsg.ChannelId)
-		ch.Topic(u, u.getMMChannelHeader(rmsg.ChannelId))
+	if rmsg.UserId == u.mc.User.Id {
+		logger.Debug("ACTION_USER_ADDED adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
+		ch.Topic(u, u.mc.GetChannelHeader(rmsg.ChannelId))
 		ch.Join(u)
 		return
 	}
-	ghost := u.createMMUser(u.MmUsers[rmsg.UserId])
+	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
 	if ghost == nil {
-		logger.Debug("couldn't add user", rmsg.UserId, u.MmUsers[rmsg.UserId].Username)
+		logger.Debug("couldn't add user", rmsg.UserId, u.mc.Users[rmsg.UserId].Username)
 		return
 	}
 	ch.Join(ghost)
 	return
-}
-
-func (u *User) getMMChannelHeader(id string) string {
-	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Header
-		}
-	}
-	return ""
-}
-
-func (u *User) getMMChannelName(id string) string {
-	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Name
-		}
-	}
-	// not found? could be a new direct message from mattermost. Try to update and check again
-	u.updateMMChannels()
-	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Name
-		}
-	}
-	return ""
-}
-
-func (u *User) getMMChannelId(name string) string {
-	for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
-		if channel.Name == name {
-			return channel.Id
-		}
-	}
-	return ""
-}
-
-func (u *User) getMMUserId(name string) string {
-	for id, u := range u.MmUsers {
-		if u.Username == name {
-			return id
-		}
-	}
-	return ""
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
@@ -463,27 +352,27 @@ func (u *User) MsgSpoofUser(rcvuser string, msg string) {
 func (u *User) handleMMDM(toUser *User, msg string) {
 	var channel string
 	// We don't have a DM with this user yet.
-	if u.getMMChannelId(toUser.User+"__"+u.MmUser.Id) == "" && u.getMMChannelId(u.MmUser.Id+"__"+toUser.User) == "" {
+	if u.mc.GetChannelId(toUser.User+"__"+u.mc.User.Id) == "" && u.mc.GetChannelId(u.mc.User.Id+"__"+toUser.User) == "" {
 		// create DM channel
-		_, err := u.MmClient.CreateDirectChannel(map[string]string{"user_id": toUser.User})
+		_, err := u.mc.Client.CreateDirectChannel(map[string]string{"user_id": toUser.User})
 		if err != nil {
 			logger.Debugf("direct message to %#v failed: %s", toUser, err)
 		}
 		// update our channels
-		mmchannels, _ := u.MmClient.GetChannels("")
-		u.MmChannels = mmchannels.Data.(*model.ChannelList)
+		mmchannels, _ := u.mc.Client.GetChannels("")
+		u.mc.Channels = mmchannels.Data.(*model.ChannelList)
 	}
 
 	// build the channel name
-	if toUser.User > u.MmUser.Id {
-		channel = u.MmUser.Id + "__" + toUser.User
+	if toUser.User > u.mc.User.Id {
+		channel = u.mc.User.Id + "__" + toUser.User
 	} else {
-		channel = toUser.User + "__" + u.MmUser.Id
+		channel = toUser.User + "__" + u.mc.User.Id
 	}
 	// build & send the message
 	msg = strings.Replace(msg, "\r", "", -1)
-	post := &model.Post{ChannelId: u.getMMChannelId(channel), Message: msg}
-	u.MmClient.CreatePost(post)
+	post := &model.Post{ChannelId: u.mc.GetChannelId(channel), Message: msg}
+	u.mc.Client.CreatePost(post)
 }
 
 func (u *User) handleMMServiceBot(toUser *User, msg string) {
@@ -495,7 +384,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 		}
 	case "LOGIN", "login":
 		{
-			if u.MmWsClient != nil {
+			if u.mc != nil {
 				u.logoutFromMattermost()
 			}
 			cred := &MmCredentials{}
@@ -552,31 +441,33 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			}
 
 			u.Credentials = cred
-			err := u.loginToMattermost()
+			var err error
+			u.mc, err = u.loginToMattermost()
 			if err != nil {
 				u.MsgUser(toUser, err.Error())
 				return
 			}
+			u.addUsersToChannels()
 			go u.WsReceiver()
 			u.MsgUser(toUser, "login OK")
 
 		}
 	case "SEARCH", "search":
 		{
-			if u.MmClient == nil {
+			if u.mc.Client == nil {
 				u.MsgUser(toUser, "Can not search, you're not logged in. Use LOGIN first.")
 				return
 			}
-			postlist := u.searchMMPosts(strings.Join(commands[1:], " "))
+			postlist := u.mc.SearchPosts(strings.Join(commands[1:], " "))
 			if postlist == nil || len(postlist.Order) == 0 {
 				u.MsgUser(toUser, "no results")
 				return
 			}
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-				channelname := u.getMMChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-				u.MsgUser(toUser, "#"+channelname+" <"+u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
-				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
+				channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
+				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
+				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 					u.MsgUser(toUser, post)
 				}
@@ -603,13 +494,13 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				return
 			}
 			commands[1] = strings.Replace(commands[1], "#", "", -1)
-			postlist := u.getMMPosts(u.getMMChannelId(commands[1]), limit)
+			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1]), limit)
 			if postlist == nil || len(postlist.Order) == 0 {
 				u.MsgUser(toUser, "no results")
 				return
 			}
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				nick := u.MmUsers[postlist.Posts[postlist.Order[i]].UserId].Username
+				nick := u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 					u.MsgUser(toUser, "<"+nick+"> "+post)
 				}
@@ -630,22 +521,22 @@ func (u *User) syncMMChannel(id string, name string) {
 		//mmConnected = true
 	}
 
-	edata, _ := u.MmClient.GetChannelExtraInfo(id, -1, "")
+	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		if mmConnected {
-			d.Username = d.Username + "-" + u.MmTeam.Name
+			d.Username = d.Username + "-" + u.mc.Team.Name
 		}
 		// join all the channels we're on on MM
-		if d.Id == u.MmUser.Id {
+		if d.Id == u.mc.User.Id {
 			ch := srv.Channel("#" + name)
 			logger.Debug("syncMMChannel adding myself to ", name, id)
-			ch.Topic(u, u.getMMChannelHeader(id))
+			ch.Topic(u, u.mc.GetChannelHeader(id))
 			ch.Join(u)
 		}
 
 		cghost, ok := srv.HasUser(d.Username)
 		if !ok {
-			ghost := u.createMMUser(u.MmUsers[d.Id])
+			ghost := u.createMMUser(u.mc.Users[d.Id])
 			ghost.MmGhostUser = true
 			logger.Info("adding", ghost.Nick, "to #"+name)
 			srv.Add(ghost)
@@ -660,71 +551,8 @@ func (u *User) syncMMChannel(id string, name string) {
 }
 
 func (u *User) joinMMChannel(channel string) error {
-	if u.getMMChannelId(strings.Replace(channel, "#", "", 1)) == "" {
-		return errors.New("failed to join")
-	}
-	_, err := u.MmClient.JoinChannel(u.getMMChannelId(strings.Replace(channel, "#", "", 1)))
-	if err != nil {
-		return errors.New("failed to join")
-	}
-	u.syncMMChannel(u.getMMChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
-	return nil
-}
-
-func (u *User) getMMPostsSince(channelId string, time int64) *model.PostList {
-	res, err := u.MmClient.GetPostsSince(channelId, time)
-	if err != nil {
-		return nil
-	}
-	return res.Data.(*model.PostList)
-}
-
-func (u *User) searchMMPosts(query string) *model.PostList {
-	res, err := u.MmClient.SearchPosts(query)
-	if err != nil {
-		return nil
-	}
-	return res.Data.(*model.PostList)
-}
-
-func (u *User) getMMPosts(channelId string, limit int) *model.PostList {
-	res, err := u.MmClient.GetPosts(channelId, 0, limit, "")
-	if err != nil {
-		return nil
-	}
-	return res.Data.(*model.PostList)
-}
-
-func (u *User) updateMMChannelHeader(channelId string, header string) {
-	data := make(map[string]string)
-	data["channel_id"] = channelId
-	data["channel_header"] = header
-	logger.Debugf("updating channelheader %#v, %#v", channelId, header)
-	_, err := u.MmClient.UpdateChannelHeader(data)
-	if err != nil {
-		logger.Info(err)
-	}
-}
-
-func (u *User) updateMMLastViewed(channelId string) {
-	logger.Debugf("posting lastview %#v", channelId)
-	_, err := u.MmClient.UpdateLastViewedAt(channelId)
-	if err != nil {
-		logger.Info(err)
-	}
-}
-
-func (u *User) updateMMChannels() error {
-	mmchannels, _ := u.MmClient.GetChannels("")
-	u.MmChannels = mmchannels.Data.(*model.ChannelList)
-	mmchannels, _ = u.MmClient.GetMoreChannels("")
-	u.MmMoreChannels = mmchannels.Data.(*model.ChannelList)
-	return nil
-}
-
-func (u *User) updateMMUsers() error {
-	mmusers, _ := u.MmClient.GetProfiles(u.MmUser.TeamId, "")
-	u.MmUsers = mmusers.Data.(map[string]*model.User)
+	u.mc.JoinChannel(channel)
+	u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
 	return nil
 }
 

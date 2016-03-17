@@ -367,9 +367,9 @@ func (s *server) whois(u *User, who string) []*irc.Message {
 		Trailing: chlist,
 	})
 
-	u.updateMMUsers()
-	if _, ok := u.MmUsers[other.User]; ok {
-		idle := (model.GetMillis() - u.MmUsers[other.User].LastActivityAt) / 1000
+	u.mc.UpdateUsers()
+	if _, ok := u.mc.Users[other.User]; ok {
+		idle := (model.GetMillis() - u.mc.Users[other.User].LastActivityAt) / 1000
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
@@ -386,7 +386,7 @@ func (s *server) topic(u *User, channelname string, header string) {
 	ch := s.Channel(channelname)
 	ch.Topic(u, header)
 	channelname = strings.Replace(channelname, "#", "", -1)
-	u.updateMMChannelHeader(u.getMMChannelId(channelname), header)
+	u.mc.UpdateChannelHeader(u.mc.GetChannelId(channelname), header)
 }
 
 func (s *server) welcome(u *User) error {
@@ -487,8 +487,8 @@ func (s *server) list(u *User) []*irc.Message {
 		Trailing: "Channel Users Topic",
 	}
 	r = append(r, &msg)
-	if u.MmUser != nil {
-		for _, channel := range append(u.MmChannels.Channels, u.MmMoreChannels.Channels...) {
+	if u.mc.User != nil {
+		for _, channel := range append(u.mc.Channels.Channels, u.mc.MoreChannels.Channels...) {
 			// FIXME: This needs to be broken up into multiple messages to fit <510 chars
 			if strings.Contains(channel.Name, "__") {
 				continue
@@ -613,7 +613,7 @@ func (s *server) handle(u *User) {
 					continue
 				}
 				ch.Part(u, msg.Trailing)
-				u.MmClient.LeaveChannel(u.getMMChannelId(strings.Replace(chName, "#", "", 1)))
+				u.mc.Client.LeaveChannel(u.mc.GetChannelId(strings.Replace(chName, "#", "", 1)))
 			}
 		case irc.QUIT:
 			partMsg = msg.Trailing
@@ -628,7 +628,7 @@ func (s *server) handle(u *User) {
 				Trailing: "You will be missed.",
 			})
 			s.Publish(&event{QuitEvent, s, nil, u, msg})
-			if u.MmWsClient != nil {
+			if u.mc.WsClient != nil {
 				u.logoutFromMattermost()
 			}
 			return
@@ -646,7 +646,7 @@ func (s *server) handle(u *User) {
 					Command: irc.ERR_NEEDMOREPARAMS,
 					Params:  []string{msg.Command},
 				})
-			} else if s.config.InviteOnly || u.MmUser == nil {
+			} else if s.config.InviteOnly || u.mc.User == nil {
 				err = u.Encode(&irc.Message{
 					Prefix:   s.Prefix(),
 					Command:  irc.ERR_INVITEONLYCHAN,
@@ -666,7 +666,7 @@ func (s *server) handle(u *User) {
 						continue
 					}
 					ch := s.Channel(channel)
-					ch.Topic(u, u.getMMChannelHeader(u.getMMChannelId(strings.Replace(channel, "#", "", -1))))
+					ch.Topic(u, u.mc.GetChannelHeader(u.mc.GetChannelId(strings.Replace(channel, "#", "", -1))))
 					err = ch.Join(u)
 					if err == nil {
 						s.Publish(&event{JoinEvent, s, ch, u, msg})
@@ -777,8 +777,8 @@ func (s *server) handle(u *User) {
 					msg.Trailing = "*" + msg.Trailing + "*"
 				}
 				msg.Trailing += "᠎"
-				post := &model.Post{ChannelId: u.getMMChannelId(p), Message: msg.Trailing}
-				u.MmClient.CreatePost(post)
+				post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
+				u.mc.Client.CreatePost(post)
 			} else if toUser, exists := s.HasUser(query); exists {
 				if query == "mattermost" {
 					go u.handleMMServiceBot(toUser, msg.Trailing)

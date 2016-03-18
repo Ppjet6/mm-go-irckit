@@ -265,8 +265,16 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 		ch.Join(ghost)
 	}
 	msgs := strings.Split(data.Message, "\n")
+
+	// check if we have a override_username (from webhooks) and use it
+	props := map[string]interface{}(data.Props)
+	overrideUsername, _ := props["override_username"].(string)
 	for _, m := range msgs {
-		ch.Message(ghost, m)
+		if overrideUsername != "" {
+			ch.SpoofMessage(overrideUsername, m)
+		} else {
+			ch.Message(ghost, m)
+		}
 	}
 
 	if len(data.Filenames) > 0 {

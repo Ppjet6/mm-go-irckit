@@ -2,7 +2,6 @@ package irckit
 
 import (
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -53,14 +52,6 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 
 	// used for login
 	u.createService("mattermost", "loginservice")
-	/*
-		mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
-		mattermostService.MmGhostUser = true
-		srv.Add(mattermostService)
-		if _, ok := srv.HasUser("mattermost"); !ok {
-			go srv.Handle(mattermostService)
-		}
-	*/
 	return u
 }
 
@@ -118,7 +109,7 @@ func (u *User) addUserToChannel(user *model.User, channel string) {
 
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
-	throttle := time.Tick(time.Millisecond * 200)
+	throttle := time.Tick(time.Millisecond * 300)
 
 	for _, mmchannel := range u.mc.Channels.Channels {
 		// exclude direct messages
@@ -181,6 +172,8 @@ func (u *User) WsReceiver() {
 			u.addUsersToChannels()
 		}
 		logger.Debugf("WsReceiver: %#v", rmsg)
+		// check if we have the users/channels in our cache. If not update
+		u.checkWsActionMessage(&rmsg)
 		switch rmsg.Action {
 		case model.ACTION_POSTED:
 			u.handleWsActionPost(&rmsg)
@@ -205,10 +198,6 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
 		}
-	}
-	// we don't have the user, refresh the userlist
-	if u.mc.Users[data.UserId] == nil {
-		u.mc.UpdateUsers()
 	}
 	ghost := u.createMMUser(u.mc.Users[data.UserId])
 	// our own message, set our IRC self as user, not our mattermost self
@@ -269,13 +258,9 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 
 	// updatelastviewed
 	u.mc.UpdateLastViewed(data.ChannelId)
-	return
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
-	if u.mc.Users[rmsg.UserId] == nil {
-		u.mc.UpdateUsers()
-	}
 	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
 
 	// remove ourselves from the channel
@@ -289,31 +274,29 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 		return
 	}
 	ch.Part(ghost, "")
-	return
 }
 
 func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
-	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
-		u.mc.UpdateChannels()
-	}
-
-	if u.mc.Users[rmsg.UserId] == nil {
-		u.mc.UpdateUsers()
-	}
-
-	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
-	// add ourselves to the channel
+	// do not add ourselves to the channel
 	if rmsg.UserId == u.mc.User.Id {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
-	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
-	if ghost == nil {
-		logger.Debug("couldn't add user", rmsg.UserId, u.mc.Users[rmsg.UserId].Username)
+	u.addUserToChannel(u.mc.Users[rmsg.UserId], u.mc.GetChannelName(rmsg.ChannelId))
+}
+
+func (u *User) checkWsActionMessage(rmsg *model.Message) {
+	// Don't check pings
+	if rmsg.Action == "ping" {
 		return
 	}
-	ch.Join(ghost)
-	return
+	logger.Debugf("checkWsActionMessage %#v\n", rmsg)
+	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
+		u.mc.UpdateChannels()
+	}
+	if u.mc.Users[rmsg.UserId] == nil {
+		u.mc.UpdateUsers()
+	}
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
@@ -360,144 +343,7 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 	u.mc.Client.CreatePost(post)
 }
 
-func (u *User) handleMMServiceBot(toUser *User, msg string) {
-	commands := strings.Fields(msg)
-	switch commands[0] {
-	case "LOGOUT", "logout":
-		{
-			u.logoutFromMattermost()
-		}
-	case "LOGIN", "login":
-		{
-			if u.mc != nil {
-				u.logoutFromMattermost()
-			}
-			cred := &MmCredentials{}
-			datalen := 5
-			if u.Cfg.DefaultTeam != "" {
-				cred.Team = u.Cfg.DefaultTeam
-				datalen--
-			}
-			if u.Cfg.DefaultServer != "" {
-				cred.Server = u.Cfg.DefaultServer
-				datalen--
-			}
-			data := strings.Split(msg, " ")
-			if len(data) == datalen {
-				cred.Pass = data[len(data)-1]
-				cred.Login = data[len(data)-2]
-				// no default server or team specified
-				if cred.Server == "" && cred.Team == "" {
-					cred.Server = data[len(data)-4]
-				}
-				if cred.Team == "" {
-					cred.Team = data[len(data)-3]
-				}
-				if cred.Server == "" {
-					cred.Server = data[len(data)-3]
-				}
-
-			}
-
-			// incorrect arguments
-			if len(data) != datalen {
-				// no server or team
-				if cred.Team != "" && cred.Server != "" {
-					u.MsgUser(toUser, "need LOGIN <login> <pass>")
-					return
-				}
-				// server missing
-				if cred.Team != "" {
-					u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
-					return
-				}
-				// team missing
-				if cred.Server != "" {
-					u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
-					return
-				}
-				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-				return
-			}
-
-			if !u.isValidMMServer(cred.Server) {
-				u.MsgUser(toUser, "not allowed to connect to "+cred.Server)
-				return
-			}
-
-			u.Credentials = cred
-			var err error
-			u.mc, err = u.loginToMattermost()
-			if err != nil {
-				u.MsgUser(toUser, err.Error())
-				return
-			}
-			u.addUsersToChannels()
-			go u.WsReceiver()
-			u.MsgUser(toUser, "login OK")
-
-		}
-	case "SEARCH", "search":
-		{
-			if u.mc.Client == nil {
-				u.MsgUser(toUser, "Can not search, you're not logged in. Use LOGIN first.")
-				return
-			}
-			postlist := u.mc.SearchPosts(strings.Join(commands[1:], " "))
-			if postlist == nil || len(postlist.Order) == 0 {
-				u.MsgUser(toUser, "no results")
-				return
-			}
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-				channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
-				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, post)
-				}
-				u.MsgUser(toUser, "")
-				u.MsgUser(toUser, "")
-			}
-		}
-	case "SCROLLBACK", "scrollback", "sb":
-		{
-			if len(commands) != 3 {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			limit, err := strconv.Atoi(commands[2])
-			if err != nil {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			if !strings.Contains(commands[1], "#") {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			commands[1] = strings.Replace(commands[1], "#", "", -1)
-			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1]), limit)
-			if postlist == nil || len(postlist.Order) == 0 {
-				u.MsgUser(toUser, "no results")
-				return
-			}
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				nick := u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, "<"+nick+"> "+post)
-				}
-			}
-		}
-	default:
-		u.MsgUser(toUser, "possible commands: LOGIN, SEARCH, SCROLLBACK")
-		u.MsgUser(toUser, "<command> help for more info")
-	}
-
-}
-
+// sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
 	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")

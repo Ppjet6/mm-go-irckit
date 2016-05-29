@@ -12,6 +12,36 @@ import (
 	"github.com/sorcix/irc"
 )
 
+type MmInfo struct {
+	MmGhostUser    bool
+	MmClient       *model.Client
+	MmWsClient     *websocket.Conn
+	MmWsQuit       bool
+	Srv            Server
+	MmUsers        map[string]*model.User
+	MmUser         *model.User
+	MmChannels     *model.ChannelList
+	MmMoreChannels *model.ChannelList
+	MmTeam         *model.Team
+	Credentials    *MmCredentials
+	Cfg            *MmCfg
+	mc             *matterclient.MMClient
+}
+
+type MmCredentials struct {
+	Login  string
+	Team   string
+	Pass   string
+	Server string
+}
+
+type MmCfg struct {
+	AllowedServers []string
+	DefaultServer  string
+	DefaultTeam    string
+	Insecure       bool
+}
+
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u := NewUser(&conn{
 		Conn:    c,
@@ -22,13 +52,15 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg = cfg
 
 	// used for login
-	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
-	mattermostService.MmGhostUser = true
-	srv.Add(mattermostService)
-	if _, ok := srv.HasUser("mattermost"); !ok {
-		go srv.Handle(mattermostService)
-	}
-
+	u.createService("mattermost", "loginservice")
+	/*
+		mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
+		mattermostService.MmGhostUser = true
+		srv.Add(mattermostService)
+		if _, ok := srv.HasUser("mattermost"); !ok {
+			go srv.Handle(mattermostService)
+		}
+	*/
 	return u
 }
 
@@ -65,64 +97,44 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 	}
 	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
+	u.Srv.Add(ghost)
+	go u.Srv.Handle(ghost)
 	return ghost
 }
 
+func (u *User) createService(nick string, what string) {
+	service := &User{Nick: nick, User: nick, Real: what, Host: "service", channels: map[Channel]struct{}{}}
+	service.MmGhostUser = true
+	u.Srv.Add(service)
+	go u.Srv.Handle(service)
+}
+
+func (u *User) addUserToChannel(user *model.User, channel string) {
+	ghost := u.createMMUser(user)
+	logger.Info("adding", ghost.Nick, "to #"+channel)
+	ch := u.Srv.Channel("#" + channel)
+	ch.Join(ghost)
+}
+
 func (u *User) addUsersToChannels() {
-	var mmConnected bool
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 200)
 
 	for _, mmchannel := range u.mc.Channels.Channels {
-
 		// exclude direct messages
 		if strings.Contains(mmchannel.Name, "__") {
 			continue
 		}
 		<-throttle
 		go func(mmchannel *model.Channel) {
-			edata, _ := u.mc.Client.GetChannelExtraInfo(mmchannel.Id, -1, "")
-			if mmConnected {
-				mmchannel.Name = mmchannel.Name + "-" + u.mc.Team.Name
-			}
-
-			// join ourself to all channels
+			u.syncMMChannel(mmchannel.Id, mmchannel.Name)
 			ch := srv.Channel("#" + mmchannel.Name)
-			ch.Topic(u, u.mc.GetChannelHeader(mmchannel.Id))
-			ch.Join(u)
-
-			// add everyone on the MM channel to the IRC channel
-			for _, d := range edata.Data.(*model.ChannelExtra).Members {
-				if mmConnected {
-					d.Username = d.Username + "-" + u.mc.Team.Name
-				}
-				// already joined
-				if d.Id == u.mc.User.Id {
-					continue
-				}
-
-				cghost, ok := srv.HasUser(d.Username)
-				if !ok {
-					ghost := u.createMMUser(u.mc.Users[d.Id])
-					ghost.MmGhostUser = true
-					logger.Info("adding", ghost.Nick, "to #"+mmchannel.Name)
-					srv.Add(ghost)
-					go srv.Handle(ghost)
-					ch := srv.Channel("#" + mmchannel.Name)
-					ch.Join(ghost)
-				} else {
-					ch := srv.Channel("#" + mmchannel.Name)
-					ch.Join(cghost)
-				}
-			}
-
 			// post everything to the channel you haven't seen yet
 			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
 			if postlist == nil {
 				logger.Errorf("something wrong with getMMPostsSince")
 				return
 			}
-			logger.Debugf("%#v", u.mc.Channels.Members[mmchannel.Id])
 			// traverse the order in reverse
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
@@ -140,48 +152,8 @@ func (u *User) addUsersToChannels() {
 		if mmuser.Id == u.mc.User.Id {
 			continue
 		}
-		_, ok := srv.HasUser(mmuser.Username)
-		if !ok {
-			if mmConnected {
-				mmuser.Username = mmuser.Username + "-" + u.mc.Team.Name
-			}
-			ghost := u.createMMUser(mmuser)
-			ghost.MmGhostUser = true
-			logger.Info("adding", ghost.Nick, "without a channel")
-			srv.Add(ghost)
-			go srv.Handle(ghost)
-		}
+		u.createMMUser(mmuser)
 	}
-}
-
-type MmInfo struct {
-	MmGhostUser    bool
-	MmClient       *model.Client
-	MmWsClient     *websocket.Conn
-	MmWsQuit       bool
-	Srv            Server
-	MmUsers        map[string]*model.User
-	MmUser         *model.User
-	MmChannels     *model.ChannelList
-	MmMoreChannels *model.ChannelList
-	MmTeam         *model.Team
-	Credentials    *MmCredentials
-	Cfg            *MmCfg
-	mc             *matterclient.MMClient
-}
-
-type MmCredentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-}
-
-type MmCfg struct {
-	AllowedServers []string
-	DefaultServer  string
-	DefaultTeam    string
-	Insecure       bool
 }
 
 func (u *User) WsReceiver() {
@@ -527,18 +499,9 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 }
 
 func (u *User) syncMMChannel(id string, name string) {
-	var mmConnected bool
 	srv := u.Srv
-	// already connected to a mm server ? add teamname as suffix
-	if _, ok := srv.HasChannel("#town-square"); ok {
-		//mmConnected = true
-	}
-
 	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
-		if mmConnected {
-			d.Username = d.Username + "-" + u.mc.Team.Name
-		}
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {
 			ch := srv.Channel("#" + name)
@@ -550,20 +513,7 @@ func (u *User) syncMMChannel(id string, name string) {
 			}
 			continue
 		}
-
-		cghost, ok := srv.HasUser(d.Username)
-		if !ok {
-			ghost := u.createMMUser(u.mc.Users[d.Id])
-			ghost.MmGhostUser = true
-			logger.Info("adding", ghost.Nick, "to #"+name)
-			srv.Add(ghost)
-			go srv.Handle(ghost)
-			ch := srv.Channel("#" + name)
-			ch.Join(ghost)
-		} else {
-			ch := srv.Channel("#" + name)
-			ch.Join(cghost)
-		}
+		u.addUserToChannel(u.mc.Users[d.Id], name)
 	}
 }
 

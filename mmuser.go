@@ -71,12 +71,7 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 func (u *User) addUsersToChannels() {
 	var mmConnected bool
 	srv := u.Srv
-	// already connected to a mm server ? add teamname as suffix
-	if _, ok := srv.HasChannel("#town-square"); ok {
-		//mmConnected = true
-	}
-	rate := time.Second / 1
-	throttle := time.Tick(rate)
+	throttle := time.Tick(time.Millisecond * 200)
 
 	for _, mmchannel := range u.mc.Channels.Channels {
 

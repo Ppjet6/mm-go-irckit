@@ -698,6 +698,15 @@ func (s *server) handle(u *User) {
 			}
 		case irc.PRIVMSG:
 			if s.okParams(u, msg, 1) {
+				//fix clients not sending colons
+				if len(msg.Params) > 1 {
+					tr := strings.Join(msg.Params[1:], " ")
+					msg.Trailing = msg.Trailing + tr
+				}
+				// empty message
+				if msg.Trailing == "" {
+					continue
+				}
 				query := msg.Params[0]
 				if _, exists := s.HasChannel(query); exists {
 					p := strings.Replace(query, "#", "", -1)

@@ -731,7 +731,7 @@ func (s *server) handle(u *User) {
 						continue
 					}
 					if toUser.MmGhostUser {
-						u.handleMMDM(toUser, msg.Trailing)
+						u.mc.SendDirectMessage(toUser.User, msg.Trailing)
 						continue
 					}
 					err = s.encodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)

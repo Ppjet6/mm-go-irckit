@@ -317,32 +317,6 @@ func (u *User) MsgSpoofUser(rcvuser string, msg string) {
 	})
 }
 
-func (u *User) handleMMDM(toUser *User, msg string) {
-	var channel string
-	// We don't have a DM with this user yet.
-	if u.mc.GetChannelId(toUser.User+"__"+u.mc.User.Id) == "" && u.mc.GetChannelId(u.mc.User.Id+"__"+toUser.User) == "" {
-		// create DM channel
-		_, err := u.mc.Client.CreateDirectChannel(toUser.User)
-		if err != nil {
-			logger.Debugf("direct message to %#v failed: %s", toUser, err)
-		}
-		// update our channels
-		mmchannels, _ := u.mc.Client.GetChannels("")
-		u.mc.Channels = mmchannels.Data.(*model.ChannelList)
-	}
-
-	// build the channel name
-	if toUser.User > u.mc.User.Id {
-		channel = u.mc.User.Id + "__" + toUser.User
-	} else {
-		channel = toUser.User + "__" + u.mc.User.Id
-	}
-	// build & send the message
-	msg = strings.Replace(msg, "\r", "", -1)
-	post := &model.Post{ChannelId: u.mc.GetChannelId(channel), Message: msg}
-	u.mc.Client.CreatePost(post)
-}
-
 // sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv

@@ -275,6 +275,8 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
 	// Don't check pings
 	if rmsg.Action == "ping" {
+		logger.Debug("Ws PONG")
+		u.mc.WsClient.WriteMessage(websocket.PongMessage, []byte{})
 		return
 	}
 	logger.Debugf("checkWsActionMessage %#v\n", rmsg)

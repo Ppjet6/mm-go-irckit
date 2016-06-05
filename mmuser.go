@@ -337,10 +337,6 @@ func (u *User) syncMMChannel(id string, name string) {
 	}
 }
 
-func (u *User) joinMMChannel(channel string) error {
-	return u.mc.JoinChannel(channel)
-}
-
 func (u *User) isValidMMServer(server string) bool {
 	if len(u.Cfg.AllowedServers) > 0 {
 		logger.Debug("allowedservers:", u.Cfg.AllowedServers)

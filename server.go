@@ -647,7 +647,7 @@ func (s *server) handle(u *User) {
 					channels := strings.Split(msg.Params[0], ",")
 					for _, channel := range channels {
 						// you can only join existing channels
-						err := u.joinMMChannel(channel)
+						err := u.mc.JoinChannel(channel)
 						if err != nil {
 							s.encodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 							continue

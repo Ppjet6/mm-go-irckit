@@ -67,14 +67,17 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	u.MmWsQuit = false
+	u.mc = mc
+	u.mc.WsQuit = false
+	go mc.WsReceiver()
+	go u.handleWsMessage()
 	return mc, nil
 }
 
 func (u *User) logoutFromMattermost() error {
 	logger.Debug("LOGOUT")
 	u.mc.Client.Logout()
-	u.MmWsQuit = true
+	u.mc.WsQuit = true
 	u.mc.WsClient.Close()
 	u.mc.WsClient.UnderlyingConn().Close()
 	u.mc.WsClient = nil
@@ -147,40 +150,24 @@ func (u *User) addUsersToChannels() {
 	}
 }
 
-func (u *User) WsReceiver() {
-	var rmsg model.Message
+func (u *User) handleWsMessage() {
 	for {
-		if u.MmWsQuit {
-			logger.Debug("exiting WsReceiver")
+		if u.mc.WsQuit {
+			logger.Debug("exiting handleWsMessage")
 			return
 		}
-		logger.Debug("in WsReceiver")
-		if err := u.mc.WsClient.ReadJSON(&rmsg); err != nil {
-			logger.Critical(err)
-			if u.MmWsQuit {
-				logger.Debug("exiting WsReceiver - MmWsQuit - ReadJSON")
-				return
-			}
-			// did the user quit
-			if _, ok := u.Srv.HasUser(u.Nick); !ok {
-				logger.Debug("user has quit, not reconnecting")
-				u.mc.WsClient.Close()
-				return
-			}
-			// reconnect
-			u.mc, _ = u.loginToMattermost()
-			u.addUsersToChannels()
-		}
-		logger.Debugf("WsReceiver: %#v", rmsg)
+		logger.Debug("in handleWsMessage")
+		message := <-u.mc.MessageChan
+		logger.Debugf("WsReceiver: %#v", message.Raw)
 		// check if we have the users/channels in our cache. If not update
-		u.checkWsActionMessage(&rmsg)
-		switch rmsg.Action {
+		u.checkWsActionMessage(message.Raw)
+		switch message.Raw.Action {
 		case model.ACTION_POSTED:
-			u.handleWsActionPost(&rmsg)
+			u.handleWsActionPost(message.Raw)
 		case model.ACTION_USER_REMOVED:
-			u.handleWsActionUserRemoved(&rmsg)
+			u.handleWsActionUserRemoved(message.Raw)
 		case model.ACTION_USER_ADDED:
-			u.handleWsActionUserAdded(&rmsg)
+			u.handleWsActionUserAdded(message.Raw)
 		}
 	}
 }
@@ -321,6 +308,9 @@ func (u *User) MsgSpoofUser(rcvuser string, msg string) {
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
 	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")
+	if edata == nil {
+		return
+	}
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {

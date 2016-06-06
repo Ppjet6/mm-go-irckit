@@ -82,6 +82,7 @@ func (u *User) logoutFromMattermost() error {
 	u.mc.WsClient.UnderlyingConn().Close()
 	u.mc.WsClient = nil
 	u.Srv.Logout(u)
+	u.mc = nil
 	return nil
 }
 
@@ -276,7 +277,9 @@ func (u *User) checkWsActionMessage(rmsg *model.Message) {
 	// Don't check pings
 	if rmsg.Action == "ping" {
 		logger.Debug("Ws PONG")
-		u.mc.WsClient.WriteMessage(websocket.PongMessage, []byte{})
+		if u.mc != nil && !u.mc.WsQuit {
+			u.mc.WsClient.WriteMessage(websocket.PongMessage, []byte{})
+		}
 		return
 	}
 	logger.Debugf("checkWsActionMessage %#v\n", rmsg)

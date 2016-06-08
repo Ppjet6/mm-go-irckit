@@ -278,14 +278,6 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
-	// Don't check pings
-	if rmsg.Action == "ping" {
-		logger.Debug("Ws PONG")
-		if u.mc != nil && !u.mc.WsQuit {
-			u.mc.WsClient.WriteMessage(websocket.PongMessage, []byte{})
-		}
-		return
-	}
 	logger.Debugf("checkWsActionMessage %#v\n", rmsg)
 	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
 		u.mc.UpdateChannels()

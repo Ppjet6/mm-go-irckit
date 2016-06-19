@@ -764,7 +764,10 @@ func (s *server) handle(u *User) {
 					}
 					msg.Trailing += " ​"
 					post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
-					u.mc.Client.CreatePost(post)
+					_, err := u.mc.Client.CreatePost(post)
+					if err != nil {
+						u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
+					}
 				} else if toUser, exists := s.HasUser(query); exists {
 					if query == "mattermost" {
 						go u.handleMMServiceBot(toUser, msg.Trailing)

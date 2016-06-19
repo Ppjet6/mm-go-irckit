@@ -79,7 +79,7 @@ func NewChannel(server Server, name string) Channel {
 	}
 }
 
-func (ch channel) Prefix() *irc.Prefix {
+func (ch *channel) Prefix() *irc.Prefix {
 	return ch.server.Prefix()
 }
 
@@ -268,7 +268,7 @@ func (ch *channel) Users() []*User {
 }
 
 // Names returns a sorted slice of Nick strings of users who are in the channel.
-func (ch channel) Names() []string {
+func (ch *channel) Names() []string {
 	users := ch.Users()
 	names := make([]string, 0, len(users))
 	for _, u := range users {

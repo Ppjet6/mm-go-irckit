@@ -76,7 +76,10 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 
 func (u *User) logoutFromMattermost() error {
 	logger.Debug("LOGOUT")
-	u.mc.Client.Logout()
+	_, err := u.mc.Client.Logout()
+	if err != nil {
+		return err
+	}
 	u.mc.WsQuit = true
 	u.mc.WsClient.Close()
 	u.mc.WsClient.UnderlyingConn().Close()

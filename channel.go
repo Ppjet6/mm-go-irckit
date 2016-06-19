@@ -12,7 +12,6 @@ import (
 // Channel is a representation of a room in our server
 type Channel interface {
 	Prefixer
-	Publisher
 
 	// ID is a normalized unique identifier for the channel
 	ID() string
@@ -58,7 +57,6 @@ type Channel interface {
 }
 
 type channel struct {
-	Publisher
 	created time.Time
 	name    string
 	server  Server
@@ -71,11 +69,10 @@ type channel struct {
 // NewChannel returns a Channel implementation for a given Server.
 func NewChannel(server Server, name string) Channel {
 	return &channel{
-		Publisher: SyncPublisher(),
-		created:   time.Now(),
-		server:    server,
-		name:      name,
-		usersIdx:  map[*User]struct{}{},
+		created:  time.Now(),
+		server:   server,
+		name:     name,
+		usersIdx: map[*User]struct{}{},
 	}
 }
 
@@ -137,15 +134,10 @@ func (ch *channel) Part(u *User, text string) {
 	}
 	u.Encode(msg)
 	delete(ch.usersIdx, u)
-	n := len(ch.usersIdx)
 	ch.mu.Unlock()
 	u.Lock()
 	delete(u.channels, ch)
 	u.Unlock()
-	ch.server.Publish(&event{PartEvent, ch.server, ch, u, msg})
-	if n == 0 {
-		ch.Publish(&event{EmptyChanEvent, ch.server, ch, u, nil})
-	}
 }
 
 // Unlink will disassociate the Channel from the Server.
@@ -164,7 +156,6 @@ func (ch *channel) Close() error {
 		})
 	}
 	ch.usersIdx = map[*User]struct{}{}
-	ch.Publisher.Close()
 	ch.mu.Unlock()
 	return nil
 }

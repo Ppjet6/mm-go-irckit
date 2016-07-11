@@ -6,25 +6,16 @@ import (
 	"time"
 
 	"github.com/42wim/matterbridge-plus/matterclient"
-	"github.com/gorilla/websocket"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
 
 type MmInfo struct {
-	MmGhostUser    bool
-	MmClient       *model.Client
-	MmWsClient     *websocket.Conn
-	MmWsQuit       bool
-	Srv            Server
-	MmUsers        map[string]*model.User
-	MmUser         *model.User
-	MmChannels     *model.ChannelList
-	MmMoreChannels *model.ChannelList
-	MmTeam         *model.Team
-	Credentials    *MmCredentials
-	Cfg            *MmCfg
-	mc             *matterclient.MMClient
+	MmGhostUser bool
+	Srv         Server
+	Credentials *MmCredentials
+	Cfg         *MmCfg
+	mc          *matterclient.MMClient
 }
 
 type MmCredentials struct {

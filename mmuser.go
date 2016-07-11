@@ -259,7 +259,7 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 
 	ghost := u.createMMUser(u.mc.GetUser(rmsg.UserId))
 	if ghost == nil {
-		logger.Debug("couldn't remove user", rmsg.UserId, u.mc.GetUser(msg.UserId).Username)
+		logger.Debug("couldn't remove user", rmsg.UserId, u.mc.GetUser(rmsg.UserId).Username)
 		return
 	}
 	ch.Part(ghost, "")

@@ -203,6 +203,11 @@ func (ch *channel) Join(u *User) error {
 	u.channels[ch] = struct{}{}
 	u.Unlock()
 
+	// only send join messages to real users
+	if u.MmGhostUser {
+		return nil
+	}
+
 	msg := &irc.Message{
 		Prefix:  u.Prefix(),
 		Command: irc.JOIN,

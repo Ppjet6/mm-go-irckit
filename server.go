@@ -48,7 +48,7 @@ type Server interface {
 	// Returns whether the rename was was successful.
 	RenameUser(*User, string) bool
 
-	// Channel gets or creates a new channel with the given name.
+	// Channel gets or creates a new channel with the given name and Id.
 	Channel(string) Channel
 
 	// HasChannel returns an existing Channel with a given name.
@@ -84,7 +84,7 @@ type ServerConfig struct {
 	// DiscardEmpty setting will start a goroutine to discard empty channels.
 	DiscardEmpty bool
 	// NewChannel overrides the constructor for a new Channel in a given Server and Name.
-	NewChannel func(s Server, name string) Channel
+	NewChannel func(s Server, channelId string, name string) Channel
 	// Commands is the handler registry to use (default: DefaultCommands())
 	Commands Commands
 }
@@ -127,6 +127,7 @@ type server struct {
 	created  time.Time
 	commands Commands
 
+	u *User
 	sync.RWMutex
 	count    int
 	users    map[string]*User
@@ -197,15 +198,16 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 }
 
 // HasChannel returns whether a given channel already exists.
-func (s *server) HasChannel(name string) (Channel, bool) {
+func (s *server) HasChannel(channelId string) (Channel, bool) {
 	s.RLock()
-	ch, exists := s.channels[ID(name)]
+	ch, exists := s.channels[channelId]
 	s.RUnlock()
 	return ch, exists
 }
 
 // Channel returns an existing or new channel with the give name.
-func (s *server) Channel(name string) Channel {
+func (s *server) Channel(channelId string) Channel {
+	name := s.u.mc.GetChannelName(channelId)
 	s.Lock()
 	id := ID(name)
 	ch, ok := s.channels[id]
@@ -224,10 +226,10 @@ func (s *server) Channel(name string) Channel {
 // UnlinkChannel unlinks the channel from the server's storage, returns whether it existed.
 func (s *server) UnlinkChannel(ch Channel) {
 	s.Lock()
-	chStored := s.channels[ch.ID()]
+	chStored := s.channels[ch.String()]
 	r := chStored == ch
 	if r {
-		delete(s.channels, ch.ID())
+		delete(s.channels, ch.String())
 	}
 	s.Unlock()
 }
@@ -407,7 +409,7 @@ func (s *server) handshake(u *User) error {
 			s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
 			continue
 		}
-
+		s.u = u
 		return s.welcome(u)
 	}
 	return ErrHandshakeFailed

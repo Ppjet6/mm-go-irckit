@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,6 +177,8 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 func (ch *channel) Topic(from Prefixer, text string) {
 	ch.mu.RLock()
 	ch.topic = text
+	// no newlines in topic
+	ch.topic = strings.Replace(ch.topic, "\n", " ", -1)
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),

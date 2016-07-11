@@ -181,8 +181,11 @@ func (u *User) handleWsMessage() {
 }
 
 func (u *User) handleWsActionPost(rmsg *model.Message) {
+	var ch Channel
 	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
-	logger.Debug("receiving userid", data.UserId)
+	props := rmsg.Props
+	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Props["post"]))["props"].(map[string]interface{})
+	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if data.UserId == u.mc.User.Id {
 		// space + ZWSP
 		if strings.Contains(data.Message, " ​") {
@@ -194,75 +197,58 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			return
 		}
 	}
+	// create new "ghost" user
 	ghost := u.createMMUser(u.mc.GetUser(data.UserId))
 	// our own message, set our IRC self as user, not our mattermost self
 	if data.UserId == u.mc.User.Id {
 		ghost = u
 	}
-	rcvchannel := u.mc.GetChannelName(data.ChannelId)
+
+	spoofUsername := ghost.Nick
+	// check if we have a override_username (from webhooks) and use it
+	overrideUsername, _ := extraProps["override_username"].(string)
+	if overrideUsername != "" {
+		spoofUsername = overrideUsername
+	}
+
+	msgs := strings.Split(data.Message, "\n")
 	// direct message
-	if strings.Contains(rcvchannel, "__") {
+	if props["channel_type"] == "D" {
 		// our own message, ignore because we can't handle/fake those on IRC
 		if data.UserId == u.mc.User.Id {
 			return
 		}
-		logger.Debug("direct message")
-		rcvuser := u.mc.GetOtherUserDM(rcvchannel)
-		msgs := strings.Split(data.Message, "\n")
-
-		// check if we have a override_username (from webhooks) and use it
-		props := map[string]interface{}(data.Props)
-		overrideUsername, _ := props["override_username"].(string)
-		for _, m := range msgs {
-			// no empty messages
-			if m == "" {
-				continue
-			}
-			if overrideUsername != "" {
-				u.MsgSpoofUser(overrideUsername, m)
-			} else {
-				u.MsgSpoofUser(rcvuser.Username, m)
-			}
-		}
-
-		if len(data.Filenames) > 0 {
-			logger.Debugf("files detected")
-			for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
-				u.MsgSpoofUser(rcvuser.Username, "download file - "+fname)
-			}
-		}
-		logger.Debug(u.mc.GetUser(data.UserId).Username, ":", data.Message)
-		logger.Debugf("%#v", data)
-		return
 	}
 
-	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.mc.GetChannelName(data.ChannelId))
-	ch := u.Srv.Channel("#" + rcvchannel)
-
-	// join if not in channel
-	if !ch.HasUser(ghost) {
-		ch.Join(ghost)
+	// not a private message so do channel stuff
+	if props["channel_type"] != "D" {
+		ch = u.Srv.Channel(data.ChannelId)
+		// join if not in channel
+		if !ch.HasUser(ghost) {
+			ch.Join(ghost)
+		}
 	}
-	msgs := strings.Split(data.Message, "\n")
 
 	// check if we have a override_username (from webhooks) and use it
-	props := map[string]interface{}(data.Props)
-	overrideUsername, _ := props["override_username"].(string)
 	for _, m := range msgs {
 		if m == "" {
 			continue
 		}
-		if overrideUsername != "" {
-			ch.SpoofMessage(overrideUsername, m)
+		if props["channel_type"] == "D" {
+			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			ch.Message(ghost, m)
+			ch.SpoofMessage(spoofUsername, m)
 		}
 	}
 
 	if len(data.Filenames) > 0 {
 		logger.Debugf("files detected")
 		for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
-			ch.Message(ghost, "download file - "+fname)
+			if props["channel_type"] == "D" {
+				u.MsgSpoofUser(spoofUsername, "download file - "+fname)
+			} else {
+				ch.SpoofMessage(spoofUsername, "download file - "+fname)
+			}
 		}
 	}
 	logger.Debugf("handleWsActionPost() user %s sent %s", u.mc.GetUser(data.UserId).Username, data.Message)

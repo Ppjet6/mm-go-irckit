@@ -208,14 +208,24 @@ func (s *server) HasChannel(channelId string) (Channel, bool) {
 // Channel returns an existing or new channel with the give name.
 func (s *server) Channel(channelId string) Channel {
 	name := s.u.mc.GetChannelName(channelId)
+	teamId := s.u.mc.GetTeamFromChannel(channelId)
+	teamName := s.u.mc.GetTeamName(teamId)
+
+	if teamName != "" && teamId != s.u.mc.Team.Id {
+		name = "#" + teamName + "/" + name
+	}
+	if teamId == s.u.mc.Team.Id {
+		name = "#" + name
+	}
+	if name == "" {
+		name = channelId
+	}
 	s.Lock()
-	id := ID(name)
-	ch, ok := s.channels[id]
+	ch, ok := s.channels[name]
 	if !ok {
 		newFn := s.config.NewChannel
-		ch = newFn(s, name)
-		id = ch.ID()
-		s.channels[id] = ch
+		ch = newFn(s, channelId, name)
+		s.channels[name] = ch
 		s.Unlock()
 	} else {
 		s.Unlock()

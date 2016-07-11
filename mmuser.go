@@ -76,15 +76,9 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 
 func (u *User) logoutFromMattermost() error {
 	logger.Infof("logout as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
-	_, err := u.mc.Client.Logout()
-	u.mc.WsQuit = true
-	u.mc.WsClient.Close()
-	u.mc.WsClient.UnderlyingConn().Close()
-	u.mc.WsClient = nil
-	u.Srv.Logout(u)
+	err := u.mc.Logout()
 	if err != nil {
 		logger.Error("logout failed")
-		return err
 	}
 	logger.Info("logout succeeded")
 	u.Srv.Logout(u)
@@ -120,7 +114,7 @@ func (u *User) addUserToChannel(user *model.User, channel string, channelId stri
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 300)
-
+	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 	for _, mmuser := range u.mc.GetUsers() {
@@ -133,30 +127,34 @@ func (u *User) addUsersToChannels() {
 	}
 	ch.Join(u)
 
-	for _, mmchannel := range u.mc.Channels.Channels {
+	for _, mmchannel := range u.mc.GetChannels() {
 		// exclude direct messages
 		if strings.Contains(mmchannel.Name, "__") {
 			continue
 		}
 		<-throttle
-		go func(mmchannel *model.Channel) {
-			u.syncMMChannel(mmchannel.Id, mmchannel.Name)
-			ch := srv.Channel("#" + mmchannel.Name)
-			// post everything to the channel you haven't seen yet
-			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
-			if postlist == nil {
-				logger.Error("something wrong with getMMPostsSince")
-				return
+		channelName := mmchannel.Name
+		if mmchannel.TeamId != u.mc.Team.Id {
+			channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+		}
+		u.syncMMChannel(mmchannel.Id, channelName)
+		srv.Channel(mmchannel.Id)
+		// post everything to the channel you haven't seen yet
+		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
+		if postlist == nil {
+			// if the channel is not from the primary team id, we can't get posts
+			if mmchannel.TeamId == u.mc.Team.Id {
+				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
 			}
-			// traverse the order in reverse
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					ch.SpoofMessage(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username, post)
-				}
+			return
+		}
+		// traverse the order in reverse
+		for i := len(postlist.Order) - 1; i >= 0; i-- {
+			for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+				ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
 			}
-			u.mc.UpdateLastViewed(mmchannel.Id)
-
-		}(mmchannel)
+		}
+		u.mc.UpdateLastViewed(mmchannel.Id)
 	}
 }
 

@@ -164,8 +164,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			ch := u.Srv.Channel(mmchannel.Id)
 			spoof = ch.SpoofMessage
 		}
-		//u.syncMMChannel(mmchannel.Id, channelName)
-		//ch := srv.Channel(mmchannel.Id)
 		// post everything to the channel you haven't seen yet
 		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 		if postlist == nil {
@@ -201,6 +199,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 
 func (u *User) handleWsMessage() {
 	updateChannelsThrottle := time.Tick(time.Second * 60)
+
 	for {
 		if u.mc.WsQuit {
 			logger.Debug("exiting handleWsMessage")
@@ -233,12 +232,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
 			return
 		}
-		if data.Type == "system_join_leave" {
+		if data.Type == model.POST_JOIN_LEAVE {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
 		}
 	}
-
 	if data.ParentId != "" {
 		parent, err := u.mc.Client.GetPost(data.ChannelId, data.ParentId, "")
 		if err != nil {
@@ -249,7 +247,6 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
 		}
 	}
-
 	// create new "ghost" user
 	ghost := u.createMMUser(u.mc.GetUser(data.UserId))
 	// our own message, set our IRC self as user, not our mattermost self
@@ -273,7 +270,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	msgs := strings.Split(data.Message, "\n")
 	// direct message
-	if props["channel_type"] == "D" && ghost != nil {
+	if props["channel_type"] == "D" {
 		// our own message, ignore because we can't handle/fake those on IRC
 		if data.UserId == u.mc.User.Id {
 			return
@@ -281,14 +278,13 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	// not a private message so do channel stuff
-	if props["channel_type"] != "D" {
+	if props["channel_type"] != "D" && ghost != nil {
 		ch = u.Srv.Channel(data.ChannelId)
 		// join if not in channel
 		if !ch.HasUser(ghost) {
 			ch.Join(ghost)
 		}
 	}
-
 	if data.Type == model.POST_JOIN_LEAVE {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
 		return
@@ -407,11 +403,11 @@ func (u *User) syncMMChannel(id string, name string) {
 		// join all the channels we're on on MM
 		if user.Id == u.mc.User.Id {
 			ch := srv.Channel(id)
-			ch.Topic(u, u.mc.GetChannelHeader(id))
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {
 				logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
 				ch.Join(u)
+				ch.Topic(u, u.mc.GetChannelHeader(id))
 			}
 			break
 		}

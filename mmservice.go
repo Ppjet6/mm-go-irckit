@@ -221,10 +221,12 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			return
 		}
 	}
-	if cmd.minParams > len(commands[1:]) {
-		u.MsgUser(toUser, fmt.Sprintf("%s requires at least %v arguments", commands[0], cmd.minParams))
-		return
-	}
+	/*
+		if cmd.minParams > len(commands[1:]) {
+			u.MsgUser(toUser, fmt.Sprintf("%s requires at least %v arguments", commands[0], cmd.minParams))
+			return
+		}
+	*/
 	if cmd.maxParams > -1 && len(commands[1:]) > cmd.maxParams {
 		u.MsgUser(toUser, fmt.Sprintf("%s takes at most %v arguments", commands[0], cmd.maxParams))
 		return

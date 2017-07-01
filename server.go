@@ -353,7 +353,7 @@ func (s *server) handle(u *User) {
 
 		go func() {
 			err = s.commands.Run(s, u, msg)
-			logger.Debug("Executed", msg, err)
+			logger.Debugf("Executed %#v %#v", msg, err)
 			if err == ErrUnknownCommand {
 				// TODO: Emit event?
 			} else if err != nil {

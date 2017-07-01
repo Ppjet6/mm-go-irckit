@@ -113,7 +113,7 @@ func (u *User) addUserToChannel(user *model.User, channel string, channelId stri
 
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
-	throttle := time.Tick(time.Millisecond * 300)
+	throttle := time.Tick(time.Millisecond * 50)
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
@@ -127,18 +127,45 @@ func (u *User) addUsersToChannels() {
 	}
 	ch.Join(u)
 
+	channels := make(chan *model.Channel, 5)
+	for i := 0; i < 10; i++ {
+		go u.addUserToChannelWorker(channels, throttle)
+	}
+
 	for _, mmchannel := range u.mc.GetChannels() {
-		// exclude direct messages
-		if strings.Contains(mmchannel.Name, "__") {
-			continue
+		logger.Debug("Adding channel", mmchannel)
+		channels <- mmchannel
+	}
+	close(channels)
+}
+
+func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <-chan time.Time) {
+	for {
+		mmchannel, ok := <-channels
+		if !ok {
+			logger.Debug("Done adding user to channels")
+			return
 		}
+		logger.Debug("addUserToChannelWorker", mmchannel)
+
 		<-throttle
-		channelName := mmchannel.Name
-		if mmchannel.TeamId != u.mc.Team.Id {
-			channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+		// exclude direct messages
+		var spoof func(string, string)
+		if strings.Contains(mmchannel.Name, "__") {
+			userId := strings.Split(mmchannel.Name, "__")[0]
+			u.createMMUser(u.mc.GetUser(userId))
+			spoof = u.MsgSpoofUser
+		} else {
+			channelName := mmchannel.Name
+			if mmchannel.TeamId != u.mc.Team.Id {
+				channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+			}
+			u.syncMMChannel(mmchannel.Id, channelName)
+			ch := u.Srv.Channel(mmchannel.Id)
+			spoof = ch.SpoofMessage
 		}
-		u.syncMMChannel(mmchannel.Id, channelName)
-		ch := srv.Channel(mmchannel.Id)
+		//u.syncMMChannel(mmchannel.Id, channelName)
+		//ch := srv.Channel(mmchannel.Id)
 		// post everything to the channel you haven't seen yet
 		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 		if postlist == nil {
@@ -146,12 +173,26 @@ func (u *User) addUsersToChannels() {
 			if mmchannel.TeamId == u.mc.Team.Id {
 				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
 			}
-			return
+			continue
 		}
+		var prevDate string
+
 		// traverse the order in reverse
 		for i := len(postlist.Order) - 1; i >= 0; i-- {
-			for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-				ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
+			p := postlist.Posts[postlist.Order[i]]
+			if p.Type == model.POST_JOIN_LEAVE {
+				continue
+			}
+			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+			for _, post := range strings.Split(p.Message, "\n") {
+				if user, ok := u.mc.Users[p.UserId]; ok {
+					date := ts.Format("2006-01-02")
+					if date != prevDate {
+						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+						prevDate = date
+					}
+					spoof(user.Username, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				}
 			}
 		}
 		u.mc.UpdateLastViewed(mmchannel.Id)

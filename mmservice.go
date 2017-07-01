@@ -92,7 +92,7 @@ func login(u *User, toUser *User, args []string) {
 		u.MsgUser(toUser, err.Error())
 		return
 	}
-	u.addUsersToChannels()
+	u.mc.OnWsConnect = u.addUsersToChannels
 	go u.mc.StatusLoop()
 	u.MsgUser(toUser, "login OK")
 

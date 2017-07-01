@@ -348,14 +348,15 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-
-		err = s.commands.Run(s, u, msg)
-		if err == ErrUnknownCommand {
-			// TODO: Emit event?
-		} else if err != nil {
-			logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
-			return
-		}
+		go func() {
+			err = s.commands.Run(s, u, msg)
+			logger.Debug("Executed", msg, err)
+			if err == ErrUnknownCommand {
+				// TODO: Emit event?
+			} else if err != nil {
+				logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
+			}
+		}()
 	}
 }
 

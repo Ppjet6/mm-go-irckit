@@ -14,6 +14,7 @@ func DefaultCommands() Commands {
 
 	cmds.Add(Handler{Command: irc.AWAY, Call: CmdAway, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson})
+	cmds.Add(Handler{Command: irc.INVITE, Call: CmdInvite, LoggedIn: true, MinParams: 2})
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LIST, Call: CmdList, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
@@ -39,6 +40,27 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 	}
 	u.mc.WsAway = true
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
+}
+
+func CmdInvite(s Server, u *User, msg *irc.Message) error {
+	who := msg.Params[0]
+	channel := msg.Params[1]
+	other, ok := s.HasUser(who)
+	if !ok {
+		return nil
+	}
+
+	channelName := strings.Replace(channel, "#", "", 1)
+	id := u.mc.GetChannelId(channelName, "")
+	if id == "" {
+		return nil
+	}
+	_, err := u.mc.Client.AddChannelMember(id, other.User)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // CmdIson is a handler for the /ISON command.

@@ -55,7 +55,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	logger.Infof("login as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
 	err := mc.Login()
 	if err != nil {
-		logger.Error("login failed")
+		logger.Error("login failed", err)
 		return nil, err
 	}
 	logger.Info("login succeeded")
@@ -78,13 +78,15 @@ func (u *User) logoutFromMattermost() error {
 }
 
 func (u *User) createMMUser(mmuser *model.User) *User {
+	if mmuser == nil {
+		return nil
+	}
 	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
 	}
 	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, Roles: mmuser.Roles, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
-	go u.Srv.Handle(ghost)
 	return ghost
 }
 
@@ -92,7 +94,6 @@ func (u *User) createService(nick string, what string) {
 	service := &User{Nick: nick, User: nick, Real: what, Host: "service", channels: map[Channel]struct{}{}}
 	service.MmGhostUser = true
 	u.Srv.Add(service)
-	go u.Srv.Handle(service)
 }
 
 func (u *User) addUserToChannel(user *model.User, channel string, channelId string) {
@@ -100,6 +101,10 @@ func (u *User) addUserToChannel(user *model.User, channel string, channelId stri
 		return
 	}
 	ghost := u.createMMUser(user)
+	if ghost == nil {
+		logger.Warnf("Cannot join %v into %s", user, channel)
+		return
+	}
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
 	ch := u.Srv.Channel(channelId)
 	ch.Join(ghost)
@@ -197,7 +202,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		ghost = u
 	}
 
-	spoofUsername := ghost.Nick
+	spoofUsername := data.UserId
+	if ghost != nil {
+		spoofUsername = ghost.Nick
+	}
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
@@ -210,7 +218,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	msgs := strings.Split(data.Message, "\n")
 	// direct message
-	if props["channel_type"] == "D" {
+	if props["channel_type"] == "D" && ghost != nil {
 		// our own message, ignore because we can't handle/fake those on IRC
 		if data.UserId == u.mc.User.Id {
 			return
@@ -224,6 +232,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if !ch.HasUser(ghost) {
 			ch.Join(ghost)
 		}
+	}
+
+	if data.Type == model.POST_JOIN_LEAVE {
+		logger.Debugf("join/leave message. not relaying %#v", data.Message)
+		return
 	}
 
 	// check if we have a override_username (from webhooks) and use it

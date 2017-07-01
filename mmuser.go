@@ -200,16 +200,17 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 }
 
 func (u *User) handleWsMessage() {
+	updateChannelsThrottle := time.Tick(time.Second * 60)
 	for {
 		if u.mc.WsQuit {
 			logger.Debug("exiting handleWsMessage")
 			return
 		}
-		logger.Debug("in handleWsMessage")
+		logger.Debug("in handleWsMessage", len(u.mc.MessageChan))
 		message := <-u.mc.MessageChan
-		logger.Debugf("WsReceiver: %#v", message.Raw)
+		logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
 		// check if we have the users/channels in our cache. If not update
-		u.checkWsActionMessage(message.Raw)
+		u.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 		switch message.Raw.Event {
 		case model.WEBSOCKET_EVENT_POSTED:
 			u.handleWsActionPost(message.Raw)
@@ -356,18 +357,17 @@ func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	u.addUserToChannel(u.mc.GetUser(userId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 }
 
-func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent) {
+func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan time.Time) {
 	if u.mc.GetChannelName(rmsg.Broadcast.ChannelId) == "" {
-		u.mc.UpdateChannels()
+		select {
+		case <-throttle:
+			logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
+			go u.mc.UpdateChannels()
+		default:
+		}
 	}
 	if rmsg.Data == nil {
 		return
-	}
-	userid, ok := rmsg.Data["user_id"].(string)
-	if ok {
-		if u.mc.GetUser(userid) == nil {
-			u.mc.UpdateUsers()
-		}
 	}
 }
 

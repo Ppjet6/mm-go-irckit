@@ -307,6 +307,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
+	// add an edited string when messages are edited
+	if len(msgs) > 0 && rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED {
+		msgs[len(msgs)-1] = msgs[len(msgs)-1] + " (edited)"
+	}
 	// check if we have a override_username (from webhooks) and use it
 	for _, m := range msgs {
 		if m == "" {

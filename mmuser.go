@@ -389,12 +389,22 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(rcvuser string, msg string) {
+	for len(msg) > 400 {
+		u.Encode(&irc.Message{
+			Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
+			Command:  irc.PRIVMSG,
+			Params:   []string{u.Nick},
+			Trailing: msg[:400] + "\n",
+		})
+		msg = msg[400:]
+	}
 	u.Encode(&irc.Message{
 		Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
 		Command:  irc.PRIVMSG,
 		Params:   []string{u.Nick},
 		Trailing: msg,
 	})
+
 }
 
 // sync IRC with mattermost channel state

@@ -260,6 +260,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if ghost != nil {
 		spoofUsername = ghost.Nick
 	}
+
+	// if we got attachments (eg slack attachments) and we have a fallback message, show this.
+	if entries, ok := extraProps["attachments"].([]interface{}); ok {
+		for _, entry := range entries {
+			if f, ok := entry.(map[string]interface{}); ok {
+				data.Message = data.Message + "\n" + f["fallback"].(string)
+			}
+		}
+	}
+
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {

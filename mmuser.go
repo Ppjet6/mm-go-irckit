@@ -229,6 +229,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	props := rmsg.Data
 	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
+	if rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED && data.HasReactions == true {
+		logger.Debugf("edit post with reactions, do not relay. We don't know if a reaction is added or the post has been edited")
+		return
+	}
 	if data.UserId == u.mc.User.Id {
 		if _, ok := extraProps["matterircd"].(bool); ok {
 			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)

@@ -185,6 +185,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			if p.Type == model.POST_JOIN_LEAVE {
 				continue
 			}
+			if p.DeleteAt > p.CreateAt {
+				continue
+			}
 			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 			for _, post := range strings.Split(p.Message, "\n") {
 				if user, ok := u.mc.Users[p.UserId]; ok {

@@ -168,8 +168,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			ch := u.Srv.Channel(mmchannel.Id)
 			spoof = ch.SpoofMessage
 		}
+		since := u.mc.GetLastViewedAt(mmchannel.Id)
+		// ignore invalid/deleted/old channels
+		if since == 0 {
+			continue
+		}
 		// post everything to the channel you haven't seen yet
-		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
+		postlist := u.mc.GetPostsSince(mmchannel.Id, since)
 		if postlist == nil {
 			// if the channel is not from the primary team id, we can't get posts
 			if mmchannel.TeamId == u.mc.Team.Id {

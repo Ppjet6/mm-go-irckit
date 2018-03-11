@@ -36,11 +36,21 @@ func DefaultCommands() Commands {
 }
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
-	u.mc.WsAway = false
+	if u.mc != nil {
+		u.mc.WsAway = false
+	}
+	if u.sc != nil {
+		u.sc.SetUserPresence("auto")
+	}
 	if msg.Trailing == "" {
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
-	u.mc.WsAway = true
+	if u.mc != nil {
+		u.mc.WsAway = true
+	}
+	if u.sc != nil {
+		u.sc.SetUserPresence("away")
+	}
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 

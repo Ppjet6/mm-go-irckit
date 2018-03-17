@@ -120,13 +120,24 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 	channelName := strings.Replace(channel, "#", "", 1)
-	id := u.mc.GetChannelId(channelName, "")
-	if id == "" {
-		return nil
+	if u.mc != nil {
+		id := u.mc.GetChannelId(channelName, "")
+		if id == "" {
+			return nil
+		}
+		_, resp := u.mc.Client.RemoveUserFromChannel(id, other.User)
+		if resp.Error != nil {
+			return resp.Error
+		}
 	}
-	_, resp := u.mc.Client.RemoveUserFromChannel(id, other.User)
-	if resp.Error != nil {
-		return resp.Error
+	if u.sc != nil {
+		if ch, exists := s.HasChannel(channel); exists {
+			if strings.HasPrefix(ch.ID(), "c") {
+				u.sc.KickUserFromChannel(strings.ToUpper(ch.ID()), other.User)
+			} else {
+				u.sc.KickUserFromGroup(strings.ToUpper(ch.ID()), other.User)
+			}
+		}
 	}
 	return nil
 }

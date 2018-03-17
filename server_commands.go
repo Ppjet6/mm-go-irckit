@@ -178,22 +178,46 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		Params:   []string{u.Nick},
 		Trailing: "Channel Users Topic",
 	})
-	for _, channel := range append(u.mc.GetChannels(), u.mc.GetMoreChannels()...) {
-		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
-		if strings.Contains(channel.Name, "__") {
-			continue
+	if u.mc != nil {
+		for _, channel := range append(u.mc.GetChannels(), u.mc.GetMoreChannels()...) {
+			// FIXME: This needs to be broken up into multiple messages to fit <510 chars
+			if strings.Contains(channel.Name, "__") {
+				continue
+			}
+			channelName := "#" + channel.Name
+			// prefix channels outside of our team with team name
+			if channel.TeamId != u.mc.Team.Id {
+				channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
+			}
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_LIST,
+				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Header, "\n", " | ", -1)},
+				Trailing: "",
+			})
 		}
-		channelName := "#" + channel.Name
-		// prefix channels outside of our team with team name
-		if channel.TeamId != u.mc.Team.Id {
-			channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
+	}
+	if u.sc != nil {
+		groups, _ := u.sc.GetGroups(false)
+		channels, _ := u.sc.GetChannels(false)
+		for _, channel := range channels {
+			channelName := "#" + channel.Name
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_LIST,
+				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
+				Trailing: "",
+			})
 		}
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_LIST,
-			Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Header, "\n", " | ", -1)},
-			Trailing: "",
-		})
+		for _, channel := range groups {
+			channelName := "#" + channel.Name
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Command:  irc.RPL_LIST,
+				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
+				Trailing: "",
+			})
+		}
 	}
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),

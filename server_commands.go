@@ -366,7 +366,11 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 				u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
 			}
 			if u.sc != nil {
-				u.sc.LeaveChannel(ch.ID())
+				if strings.HasPrefix(ch.ID(), "c") {
+					u.sc.LeaveChannel(strings.ToUpper(ch.ID()))
+				} else {
+					u.sc.LeaveGroup(strings.ToUpper(ch.ID()))
+				}
 			}
 		}
 		// part all other (ghost)users on the channel

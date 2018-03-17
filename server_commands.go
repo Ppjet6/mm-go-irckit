@@ -77,7 +77,11 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	if u.sc != nil {
 		if ch, exists := s.HasChannel(channel); exists {
 			logger.Debugf("inviting %s to %s", other.User, strings.ToUpper(ch.ID()))
-			u.sc.InviteUserToChannel(strings.ToUpper(ch.ID()), other.User)
+			if strings.HasPrefix(ch.ID(), "c") {
+				u.sc.InviteUserToChannel(strings.ToUpper(ch.ID()), other.User)
+			} else {
+				u.sc.InviteUserToGroup(strings.ToUpper(ch.ID()), other.User)
+			}
 		}
 	}
 

@@ -63,14 +63,22 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	channelName := strings.Replace(channel, "#", "", 1)
-	id := u.mc.GetChannelId(channelName, "")
-	if id == "" {
-		return nil
+	if u.mc != nil {
+		channelName := strings.Replace(channel, "#", "", 1)
+		id := u.mc.GetChannelId(channelName, "")
+		if id == "" {
+			return nil
+		}
+		_, resp := u.mc.Client.AddChannelMember(id, other.User)
+		if resp.Error != nil {
+			return resp.Error
+		}
 	}
-	_, resp := u.mc.Client.AddChannelMember(id, other.User)
-	if resp.Error != nil {
-		return resp.Error
+	if u.sc != nil {
+		if ch, exists := s.HasChannel(channel); exists {
+			logger.Debugf("inviting %s to %s", other.User, strings.ToUpper(ch.ID()))
+			u.sc.InviteUserToChannel(strings.ToUpper(ch.ID()), other.User)
+		}
 	}
 
 	return nil

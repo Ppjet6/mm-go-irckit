@@ -157,8 +157,8 @@ func (u *User) handleSlack() {
 			case *slack.MessageEvent:
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
-				logger.Debugf("disconnecting..")
-				return
+				logger.Debug("disconnected event received, we should reconnect now..")
+				//	return
 			}
 		}
 	}

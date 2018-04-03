@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"errors"
 	"html"
 	"regexp"
 	"strings"
@@ -29,10 +30,15 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 	go u.rtm.ManageConnection()
 	//time.Sleep(time.Second * 2)
 	u.sinfo = u.rtm.GetInfo()
+	count := 0
 	for u.sinfo == nil {
 		time.Sleep(time.Millisecond * 500)
 		logger.Debug("still waiting for sinfo")
 		u.sinfo = u.rtm.GetInfo()
+		count++
+		if count == 20 {
+			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
+		}
 	}
 	go u.handleSlack()
 	u.addSlackUsersToChannels()

@@ -68,7 +68,7 @@ func (u *User) createSlackUser(slackuser *slack.User) *User {
 	if ghost, ok := u.Srv.HasUser(slackuser.Name); ok {
 		return ghost
 	}
-	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}, DisplayName: slackuser.Profile.DisplayName}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
 	return ghost
@@ -226,6 +226,10 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	spoofUsername := user.ID
 	if ghost != nil {
 		spoofUsername = ghost.Nick
+		if ghost.DisplayName != "" {
+			spoofUsername = "|"
+			//	spoofUsername = ghost.DisplayName
+		}
 	}
 
 	// if we have a botname, use it
@@ -271,6 +275,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
+			if ghost.DisplayName != "" {
+				m = "<" + ghost.DisplayName + "> " + m
+			}
 			ch.SpoofMessage(spoofUsername, m)
 		}
 	}

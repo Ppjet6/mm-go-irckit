@@ -299,19 +299,12 @@ func (u *User) syncSlackChannel(id string, name string) {
 			}
 		}
 	}
-	// before joining ourself
-	for _, user := range info.Members {
-		// join all the channels we're on on MM
-		if user == u.sinfo.User.ID {
-			ch := srv.Channel(id)
-			// only join when we're not yet on the channel
-			if !ch.HasUser(u) {
-				logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
-				ch.Join(u)
-				//ch.Topic(u, u.mc.GetChannelHeader(id))
-			}
-			break
-		}
+
+	ch := srv.Channel(id)
+	ch.Topic(u, info.Topic.Value)
+	if !ch.HasUser(u) {
+		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
+		ch.Join(u)
 	}
 }
 
@@ -332,19 +325,12 @@ func (u *User) syncSlackGroup(id string, name string) {
 			}
 		}
 	}
-	// before joining ourself
-	for _, user := range info.Members {
-		// join all the channels we're on on MM
-		if user == u.sinfo.User.ID {
-			ch := srv.Channel(id)
-			// only join when we're not yet on the channel
-			if !ch.HasUser(u) {
-				logger.Debugf("syncSlackgroup adding myself to %s (id: %s)", name, id)
-				ch.Join(u)
-				//ch.Topic(u, u.mc.GetChannelHeader(id))
-			}
-			break
-		}
+
+	ch := srv.Channel(id)
+	ch.Topic(u, info.Topic.Value)
+	if !ch.HasUser(u) {
+		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
+		ch.Join(u)
 	}
 }
 

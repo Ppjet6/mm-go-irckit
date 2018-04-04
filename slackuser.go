@@ -214,9 +214,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
 		if bot.Name != "" {
 			botname = bot.Name
-			if rmsg.Username != "" {
-				botname = rmsg.Username
-			}
+		} else if rmsg.Username != "" {
+			botname = rmsg.Username
 		}
 	}
 

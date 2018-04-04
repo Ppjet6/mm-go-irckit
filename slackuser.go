@@ -225,7 +225,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	spoofUsername := user.ID
 	if ghost != nil {
 		spoofUsername = ghost.Nick
-		if ghost.DisplayName != "" {
+		if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
 			spoofUsername = "|"
 			//	spoofUsername = ghost.DisplayName
 		}

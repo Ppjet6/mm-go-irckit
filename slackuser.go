@@ -246,7 +246,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		spoofUsername = user.ID
 		if ghost != nil {
 			spoofUsername = ghost.Nick
-			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
+			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick && u.MmInfo.Cfg.SlackSettings.UseDisplayName {
 				spoofUsername = "|"
 				//	spoofUsername = ghost.DisplayName
 			}
@@ -297,7 +297,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
+			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick &&
+				u.MmInfo.Cfg.SlackSettings.UseDisplayName {
 				m = "<" + ghost.DisplayName + "> " + m
 			}
 			ch.SpoofMessage(spoofUsername, m)

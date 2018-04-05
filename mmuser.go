@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/42wim/matterbridge/matterclient"
+	"github.com/42wim/matterircd/config"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
@@ -30,6 +31,7 @@ type MmCredentials struct {
 
 type MmCfg struct {
 	AllowedServers []string
+	SlackSettings  config.Settings
 	DefaultServer  string
 	DefaultTeam    string
 	Insecure       bool

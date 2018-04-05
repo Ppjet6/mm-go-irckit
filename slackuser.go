@@ -213,11 +213,12 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	// handle bot messages
 	botname := ""
 	if rmsg.User == "" && rmsg.BotID != "" {
-		bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
-		if bot.Name != "" {
-			botname = bot.Name
-		} else if rmsg.Username != "" {
-			botname = rmsg.Username
+		botname = rmsg.Username
+		if botname == "" {
+			bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
+			if bot.Name != "" {
+				botname = bot.Name
+			}
 		}
 	}
 

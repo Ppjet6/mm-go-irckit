@@ -149,11 +149,17 @@ func (u *User) addSlackUsersToChannels() {
 	mmchannels, _ := u.sc.GetChannels(true)
 	for _, mmchannel := range mmchannels {
 		if mmchannel.IsMember {
+			if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
+				continue
+			}
 			logger.Debug("Adding channel", mmchannel)
 			channels <- mmchannel
 		}
 	}
 	for _, mmchannel := range groups {
+		if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
+			continue
+		}
 		logger.Debug("Adding private channel", mmchannel)
 		channels <- mmchannel
 	}

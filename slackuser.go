@@ -206,6 +206,12 @@ func (u *User) handleSlack() {
 		for msg := range u.rtm.IncomingEvents {
 			switch ev := msg.Data.(type) {
 			case *slack.MessageEvent:
+				if ev.SubType == "group_join" {
+					u.syncSlackGroup(ev.Channel, "")
+				}
+				if ev.SubType == "channel_join" {
+					u.syncSlackChannel(ev.Channel, "")
+				}
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
 				logger.Debug("disconnected event received, we should reconnect now..")
@@ -336,6 +342,10 @@ func (u *User) syncSlackChannel(id string, name string) {
 		logger.Info(err)
 	}
 
+	if name == "" {
+		name = info.Name
+	}
+
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
 			//slackuser, _ := u.sc.GetUserInfo(user)
@@ -360,6 +370,10 @@ func (u *User) syncSlackGroup(id string, name string) {
 	info, err := u.sc.GetGroupInfo(id)
 	if err != nil {
 		logger.Info(err)
+	}
+
+	if name == "" {
+		name = info.Name
 	}
 
 	for _, user := range info.Members {

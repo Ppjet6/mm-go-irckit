@@ -57,6 +57,22 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 			return nil, errors.New("Not allowed to connect to " + u.sinfo.Team.Domain + " slack")
 		}
 	}
+	// we only know which user we are when we actually are connected.
+	// disconnect if we're not allowed
+	if len(u.MmInfo.Cfg.SlackSettings.BlackListUser) > 0 {
+		ok := false
+		for _, user := range u.MmInfo.Cfg.SlackSettings.BlackListUser {
+			if user == u.sinfo.User.Name {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			u.rtm.Disconnect()
+			return nil, errors.New("Not allowed to connect")
+		}
+	}
+
 	go u.handleSlack()
 	u.addSlackUsersToChannels()
 	u.connected = true

@@ -298,6 +298,11 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	// join channel if we haven't yet
+	if !ch.HasUser(u) {
+		ch.Join(u)
+	}
+
 	for _, m := range msgs {
 		// cleanup the message
 		m = u.replaceMention(m)

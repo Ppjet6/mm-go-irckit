@@ -242,7 +242,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 	if len(rmsg.Attachments) > 0 {
 		// skip messages we made ourselves
-		if rmsg.Attachments[0].CallbackID == "matterircd" {
+		if rmsg.Attachments[0].CallbackID == "matterircd_"+u.sinfo.User.ID {
 			return
 		}
 	}

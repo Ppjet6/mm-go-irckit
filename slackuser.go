@@ -303,6 +303,17 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		ch.Join(u)
 	}
 
+	// look in attachments if we have no text
+	if rmsg.Text == "" {
+		for _, attach := range rmsg.Attachments {
+			if attach.Text != "" {
+				msgs = append(msgs, strings.Split(attach.Text, "\n")...)
+			} else {
+				msgs = append(msgs, strings.Split(attach.Fallbak, "\n")...)
+			}
+		}
+	}
+
 	for _, m := range msgs {
 		// cleanup the message
 		m = u.replaceMention(m)
@@ -310,17 +321,6 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		m = u.replaceChannel(m)
 		m = u.replaceURL(m)
 		m = html.UnescapeString(m)
-
-		// look in attachments if we have no text
-		if m == "" {
-			for _, attach := range rmsg.Attachments {
-				if attach.Text != "" {
-					m = attach.Text
-				} else {
-					m = attach.Fallback
-				}
-			}
-		}
 
 		// still no text, ignore this message
 		if m == "" {

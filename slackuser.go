@@ -291,16 +291,19 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	ch = u.Srv.Channel(rmsg.Channel)
 
-	if ghost != nil {
-		// join if not in channel
-		if !ch.HasUser(ghost) {
-			ch.Join(ghost)
+	// do not join channel for direct messages
+	if !strings.HasPrefix(rmsg.Channel, "D") {
+		if ghost != nil {
+			// join if not in channel
+			if !ch.HasUser(ghost) {
+				ch.Join(ghost)
+			}
 		}
-	}
 
-	// join channel if we haven't yet
-	if !ch.HasUser(u) {
-		ch.Join(u)
+		// join channel if we haven't yet
+		if !ch.HasUser(u) {
+			ch.Join(u)
+		}
 	}
 
 	// look in attachments if we have no text

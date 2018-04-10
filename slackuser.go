@@ -312,7 +312,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 			if attach.Text != "" {
 				msgs = append(msgs, strings.Split(attach.Text, "\n")...)
 			} else {
-				msgs = append(msgs, strings.Split(attach.Fallbak, "\n")...)
+				msgs = append(msgs, strings.Split(attach.Fallback, "\n")...)
 			}
 		}
 	}

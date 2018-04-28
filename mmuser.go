@@ -31,6 +31,7 @@ type MmCredentials struct {
 
 type MmCfg struct {
 	AllowedServers     []string
+	AllowedTeams       []string
 	SlackSettings      config.Settings
 	MattermostSettings config.Settings
 	DefaultServer      string
@@ -52,6 +53,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg = cfg
 	u.MmInfo.Cfg.AllowedServers = cfg.MattermostSettings.Restrict
 	u.MmInfo.Cfg.DefaultServer = cfg.MattermostSettings.DefaultServer
+	u.MmInfo.Cfg.AllowedTeams = cfg.MattermostSettings.RestrictTeams
 	u.MmInfo.Cfg.DefaultTeam = cfg.MattermostSettings.DefaultTeam
 	u.MmInfo.Cfg.JoinInclude = cfg.MattermostSettings.JoinInclude
 	u.MmInfo.Cfg.JoinExclude = cfg.MattermostSettings.JoinExclude
@@ -518,6 +520,19 @@ func (u *User) isValidMMServer(server string) bool {
 		logger.Debugf("allowedservers: %s", u.Cfg.AllowedServers)
 		for _, srv := range u.Cfg.AllowedServers {
 			if srv == server {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func (u *User) isValidMMTeam(team string) bool {
+	if len(u.Cfg.AllowedTeams) > 0 {
+		logger.Debugf("allowedteams: %s", u.Cfg.AllowedTeams)
+		for _, t := range u.Cfg.AllowedTeams {
+			if t == team {
 				return true
 			}
 		}

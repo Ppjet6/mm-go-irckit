@@ -125,6 +125,11 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if !u.isValidMMTeam(cred.Team) {
+		u.MsgUser(toUser, "not allowed to connect to " + cred.Team)
+		return
+	}
+
 	if u.sc != nil {
 		fmt.Println("login, starting logout")
 		err := u.logoutFromSlack()
